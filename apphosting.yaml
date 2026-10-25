@@ -1,0 +1,46 @@
+# Firebase App Hosting — backend configuration
+# https://firebase.google.com/docs/app-hosting/configure
+#
+# Secrets ต้องสร้างและ Grant Access ให้ backend ก่อน Deploy เช่น
+#   firebase apphosting:secrets:set BRT_SOP_DATABASE_URL
+#   firebase apphosting:secrets:set BRT_SOP_ADMIN_EMAIL
+# (คำสั่ง set จะถามว่าจะ grant access ให้ backend หรือไม่ — ตอบ Yes)
+
+runConfig:
+  minInstances: 0
+  maxInstances: 3
+  concurrency: 40
+  memoryMiB: 1024
+  cpu: 1
+
+env:
+  - variable: DATABASE_URL
+    secret: BRT_SOP_DATABASE_URL
+    availability:
+      - RUNTIME
+
+  - variable: BOOTSTRAP_ADMIN_EMAIL
+    secret: BRT_SOP_ADMIN_EMAIL
+    availability:
+      - RUNTIME
+
+  # จำนวน connection ต่อ instance (maxInstances × DB_POOL_MAX ต้องไม่เกินขีดจำกัดของฐานข้อมูล)
+  - variable: DB_POOL_MAX
+    value: "5"
+    availability:
+      - RUNTIME
+
+  # Firebase Web SDK config — App Hosting ใส่ FIREBASE_WEBAPP_CONFIG ให้อัตโนมัติตอน build
+  # ถ้าต้องการกำหนดเอง ให้เอา comment ออกและใส่ค่าจาก Firebase Console → Project settings → Your apps
+  # - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+  #   value: "..."
+  #   availability: [BUILD, RUNTIME]
+  # - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+  #   value: "YOUR_PROJECT.firebaseapp.com"
+  #   availability: [BUILD, RUNTIME]
+  # - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+  #   value: "YOUR_PROJECT_ID"
+  #   availability: [BUILD, RUNTIME]
+  # - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+  #   value: "..."
+  #   availability: [BUILD, RUNTIME]

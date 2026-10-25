@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# local env & secrets — never commit
+.env
+.env*.local
+*.pem
+service-account*.json
+
+# local development database (PGlite)
+.data/
+
+# firebase
+.firebase/
+firebase-debug.log*
+
+# logs & OS
+npm-debug.log*
+*.log
+.DS_Store
+Thumbs.db
+
+# local tooling (Claude Code preview config)
+.claude/
