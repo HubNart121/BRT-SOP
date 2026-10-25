@@ -30,17 +30,17 @@ env:
     availability:
       - RUNTIME
 
-  # Firebase Web SDK config — App Hosting ใส่ FIREBASE_WEBAPP_CONFIG ให้อัตโนมัติตอน build
-  # ถ้าต้องการกำหนดเอง ให้เอา comment ออกและใส่ค่าจาก Firebase Console → Project settings → Your apps
-  # - variable: NEXT_PUBLIC_FIREBASE_API_KEY
-  #   value: "..."
-  #   availability: [BUILD, RUNTIME]
-  # - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
-  #   value: "YOUR_PROJECT.firebaseapp.com"
-  #   availability: [BUILD, RUNTIME]
-  # - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
-  #   value: "YOUR_PROJECT_ID"
-  #   availability: [BUILD, RUNTIME]
-  # - variable: NEXT_PUBLIC_FIREBASE_APP_ID
-  #   value: "..."
-  #   availability: [BUILD, RUNTIME]
+  # Firebase Web SDK config of project brt-sop-center (Web App "BRT SOP Center Web").
+  # Public values — they are compiled into the browser JavaScript; access is enforced by Firebase Auth + the API.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: "AIzaSyD7F7j5WzjdMzK9uxvQcNqIGsHKX7Vjm4Q"
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: "brt-sop-center.firebaseapp.com"
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: "brt-sop-center"
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:959139949716:web:f8363219ebbf0b47329881"
+    availability: [BUILD, RUNTIME]
