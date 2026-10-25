@@ -99,7 +99,7 @@ function DrawioView({ node, deleteNode }: NodeViewProps) {
         </div>
       ) : (
         <div className="fig-empty">
-          {diagram ? 'ยังไม่มีภาพตัวอย่างของผังงานนี้' : 'ยังไม่ได้วาดผังงาน'}
+          {diagram ? 'ไม่มีภาพตัวอย่าง — ผังงานอาจใหญ่เกินไป ลองแบ่งเป็นหลายผัง' : 'ยังไม่ได้วาดผังงาน'}
           {ctx.editable && (
             <button type="button" className="btn btn-outline btn-sm" onClick={() => ctx.onEdit(blockId)}>
               <IconPencil size={15} />

@@ -45,7 +45,7 @@ const csp = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   env: firebaseEnv,
-  serverExternalPackages: ['@electric-sql/pglite', 'pg', 'firebase-admin'],
+  serverExternalPackages: ['firebase-admin'],
   async headers() {
     return [
       {

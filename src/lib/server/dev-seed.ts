@@ -1,158 +1,228 @@
 import 'server-only';
+import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { doc, docToText, h2, ol, p, ul } from '@/lib/shared/content';
-import type { Database } from './db';
-import type { TiptapDoc } from '@/lib/shared/types';
+import type { Role, StepState, TiptapDoc, VersionState } from '@/lib/shared/types';
+import { DEFAULT_CATEGORIES } from './auth';
+import {
+  C,
+  bangkokDate,
+  emailKey,
+  newId,
+  type CategoryDoc,
+  type SopDoc,
+  type StepDoc,
+  type UserDoc,
+  type VersionDoc,
+} from './db';
+
+const daysAgo = (d: number) => Timestamp.fromMillis(Date.now() - d * 86_400_000);
 
 /**
- * Demo data for local development (PGlite only — never runs against DATABASE_URL).
+ * Demo data for local development (Firestore emulator only — getDb() calls this only in demo mode).
  * Users log in through the dev login screen; there are no passwords.
  */
-export async function seedDemoData(db: Database): Promise<void> {
-  await db.tx(async (q) => {
-    const users = [
-      ['admin@brt.local', 'ผู้ดูแลระบบ (ทดลอง)', 'ADMIN'],
-      ['author@brt.local', 'ผู้เขียน (ทดลอง)', 'AUTHOR'],
-      ['reviewer@brt.local', 'ผู้ตรวจทาน (ทดลอง)', 'REVIEWER'],
-      ['approver@brt.local', 'ผู้อนุมัติ (ทดลอง)', 'APPROVER'],
-      ['viewer@brt.local', 'พนักงานคลังสินค้า (ทดลอง)', 'VIEWER'],
-    ];
-    const ids: Record<string, string> = {};
-    for (const [email, name, role] of users) {
-      const { rows } = await q.query(
-        `insert into app_users (email, full_name, role) values ($1, $2, $3) returning id`,
-        [email, name, role],
-      );
-      ids[role] = rows[0].id;
-    }
-    const cats: Record<string, string> = {};
-    for (const r of (await q.query(`select id, slug from sop_categories`)).rows) cats[r.slug] = r.id;
+export async function seedDemoData(db: Firestore): Promise<void> {
+  const batch = db.batch();
+  const ids: Record<string, string> = {};
+  const users: [string, string, Role][] = [
+    ['admin@brt.local', 'ผู้ดูแลระบบ (ทดลอง)', 'ADMIN'],
+    ['author@brt.local', 'ผู้เขียน (ทดลอง)', 'AUTHOR'],
+    ['reviewer@brt.local', 'ผู้ตรวจทาน (ทดลอง)', 'REVIEWER'],
+    ['approver@brt.local', 'ผู้อนุมัติ (ทดลอง)', 'APPROVER'],
+    ['viewer@brt.local', 'พนักงานคลังสินค้า (ทดลอง)', 'VIEWER'],
+  ];
+  for (const [email, name, role] of users) {
+    const id = newId();
+    ids[role] = id;
+    const u: UserDoc = {
+      email,
+      firebase_uid: null,
+      full_name: name,
+      role,
+      is_active: true,
+      created_at: daysAgo(90),
+      updated_at: daysAgo(90),
+      last_login_at: null,
+    };
+    batch.create(db.collection(C.users).doc(id), u);
+    batch.create(db.collection(C.userEmails).doc(emailKey(email)), { user_id: id });
+  }
+  const cats: Record<string, string> = {};
+  DEFAULT_CATEGORIES.forEach(([name, slug], i) => {
+    const id = newId();
+    cats[slug] = id;
+    const c: CategoryDoc = { name, slug, parent_id: null, sort_order: (i + 1) * 10, created_at: daysAgo(90) };
+    batch.create(db.collection(C.categories).doc(id), c);
+    batch.create(db.collection(C.categorySlugs).doc(slug), { category_id: id });
+  });
 
-    const author = ids.AUTHOR;
-    const reviewer = ids.REVIEWER;
-    const approver = ids.APPROVER;
+  const author = ids.AUTHOR;
+  const reviewer = ids.REVIEWER;
+  const approver = ids.APPROVER;
 
-    async function sop(code: string, title: string, cat: string): Promise<string> {
-      const { rows } = await q.query(
-        `insert into sops (code, title, owner_id, created_at, updated_at)
-         values ($1, $2, $3, now() - interval '60 days', now() - interval '60 days') returning id`,
-        [code, title, author],
-      );
-      await q.query(`insert into sop_category_links (sop_id, category_id) values ($1, $2)`, [rows[0].id, cats[cat]]);
-      await q.query(`insert into audit_events (actor_id, sop_id, event_type, metadata, created_at)
-                     values ($1, $2, 'SOP_CREATED', $3, now() - interval '60 days')`, [
-        author,
-        rows[0].id,
-        JSON.stringify({ code, title }),
-      ]);
-      return rows[0].id;
-    }
+  interface V {
+    rev: number;
+    title: string;
+    content: TiptapDoc;
+    state: VersionState;
+    label?: string;
+    days: number;
+    supersededDays?: number;
+    note?: string;
+    attempts?: number;
+  }
 
-    async function version(
-      sopId: string,
-      rev: number,
-      title: string,
-      content: TiptapDoc,
-      opts: { state: string; label?: string; daysAgo: number; supersededDaysAgo?: number; note?: string },
-    ): Promise<string> {
-      const published = opts.state === 'PUBLISHED' || opts.state === 'SUPERSEDED';
-      const { rows } = await q.query(
-        `insert into sop_versions (sop_id, revision_no, state, version_label, title, content_json, content_text,
-                                   change_note, created_by, updated_by, created_at, updated_at, submitted_at,
-                                   published_at, published_by, effective_date, superseded_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9,
-                 now() - make_interval(days => $10 + 3), now() - make_interval(days => $10),
-                 case when $3 <> 'DRAFT' then now() - make_interval(days => $10 + 2) end,
-                 case when $11 then now() - make_interval(days => $10) end,
-                 case when $11 then $12::uuid end,
-                 case when $11 then ((now() - make_interval(days => $10)) at time zone 'Asia/Bangkok')::date end,
-                 case when $13::int is not null then now() - make_interval(days => $13::int) end)
-         returning id`,
-        [
-          sopId,
-          rev,
-          opts.state,
-          opts.label ?? null,
-          title,
-          JSON.stringify(content),
-          docToText(content),
-          opts.note ?? '',
-          author,
-          opts.daysAgo,
-          published,
-          approver,
-          opts.supersededDaysAgo ?? null,
-        ],
-      );
-      const vid: string = rows[0].id;
-      if (published) {
-        await q.query(
-          `insert into approval_steps (version_id, attempt_no, step_no, step_type, assignee_id, state, comment,
-                                       decided_by, decided_at, created_at)
-           values ($1, 1, 1, 'REVIEW', $2, 'APPROVED', '', $2, now() - make_interval(days => $4 + 1), now() - make_interval(days => $4 + 2)),
-                  ($1, 1, 2, 'APPROVE', $3, 'APPROVED', '', $3, now() - make_interval(days => $4), now() - make_interval(days => $4 + 2))`,
-          [vid, reviewer, approver, opts.daysAgo],
-        );
-        await q.query(
-          `insert into audit_events (actor_id, sop_id, version_id, event_type, metadata, created_at)
-           values ($1, $2, $3, 'PUBLISHED', $4, now() - make_interval(days => $5))`,
-          [approver, sopId, vid, JSON.stringify({ label: opts.label, attempt_no: 1 }), opts.daysAgo],
-        );
-      }
-      if (opts.state === 'PUBLISHED') {
-        await q.query(`update sops set published_version_id = $2, title = $3, updated_at = now() - make_interval(days => $4)
-                        where id = $1`, [sopId, vid, title, opts.daysAgo]);
-      }
-      return vid;
-    }
-
-    // ── SOP-SAL-001: 1.0 superseded by 1.1 ──
-    const sal = await sop('SOP-SAL-001', 'รับคำขอใบเสนอราคา (RFQ) และออกใบเสนอราคา', 'sales');
-    await version(sal, 1, 'รับคำขอใบเสนอราคา (RFQ) และออกใบเสนอราคา', salContent(false), {
-      state: 'SUPERSEDED',
-      label: '1.0',
-      daysAgo: 50,
-      supersededDaysAgo: 12,
+  function auditEv(sopId: string, versionId: string | null, actor: string, type: string, days: number, meta = {}) {
+    batch.create(db.collection(C.sops).doc(sopId).collection(C.audit).doc(), {
+      actor_id: actor,
+      version_id: versionId,
+      event_type: type,
+      metadata: meta,
+      created_at: daysAgo(days),
     });
-    await version(sal, 2, 'รับคำขอใบเสนอราคา (RFQ) และออกใบเสนอราคา', salContent(true), {
+  }
+
+  function step(sopId: string, vid: string, attempt: number, no: 1 | 2, state: StepState, days: number, comment = '') {
+    const decided = state === 'APPROVED' || state === 'REJECTED';
+    const assignee = no === 1 ? reviewer : approver;
+    const s: StepDoc = {
+      sop_id: sopId,
+      version_id: vid,
+      attempt_no: attempt,
+      step_no: no,
+      step_type: no === 1 ? 'REVIEW' : 'APPROVE',
+      assignee_id: assignee,
+      state,
+      comment,
+      decided_by: decided ? assignee : null,
+      decided_at: decided ? daysAgo(days) : null,
+      created_at: daysAgo(days + 1),
+    };
+    batch.create(db.collection(C.steps).doc(newId()), s);
+  }
+
+  function sop(code: string, title: string, cat: string, versions: V[]): { sopId: string; vids: string[] } {
+    const sopId = newId();
+    const vids = versions.map(() => newId());
+    let published: SopDoc['published'] = null;
+    let active: SopDoc['active'] = null;
+    let publishedId: string | null = null;
+    let activeId: string | null = null;
+    let lastChange = 60;
+    versions.forEach((v, i) => {
+      const isPub = v.state === 'PUBLISHED' || v.state === 'SUPERSEDED';
+      const vd: VersionDoc = {
+        revision_no: v.rev,
+        version_label: v.label ?? null,
+        state: v.state,
+        title: v.title,
+        content_json: JSON.stringify(v.content),
+        content_text: docToText(v.content),
+        change_note: v.note ?? '',
+        major_change: false,
+        based_on_version_id: i > 0 ? vids[i - 1] : null,
+        based_on_label: i > 0 ? (versions[i - 1].label ?? null) : null,
+        row_version: 1,
+        last_attempt_no: v.attempts ?? (isPub ? 1 : 0),
+        created_by: author,
+        updated_by: author,
+        created_at: daysAgo(v.days + 3),
+        updated_at: daysAgo(v.days),
+        submitted_at: v.state === 'DRAFT' ? null : daysAgo(v.days + 2),
+        published_at: isPub ? daysAgo(v.days) : null,
+        published_by: isPub ? approver : null,
+        effective_date: isPub ? bangkokDate(daysAgo(v.days).toDate()) : null,
+        superseded_at: v.supersededDays !== undefined ? daysAgo(v.supersededDays) : null,
+      };
+      batch.create(db.collection(C.sops).doc(sopId).collection(C.versions).doc(vids[i]), vd);
+      const summary = {
+        id: vids[i],
+        state: v.state,
+        revision_no: v.rev,
+        label: v.label ?? null,
+        effective_date: vd.effective_date,
+        updated_at: vd.updated_at,
+      };
+      if (v.state === 'PUBLISHED') {
+        published = summary;
+        publishedId = vids[i];
+      } else if (v.state !== 'SUPERSEDED') {
+        active = summary;
+        activeId = vids[i];
+      }
+      lastChange = Math.min(lastChange, v.days);
+      if (isPub) {
+        step(sopId, vids[i], 1, 1, 'APPROVED', v.days + 1);
+        step(sopId, vids[i], 1, 2, 'APPROVED', v.days);
+        auditEv(sopId, vids[i], approver, 'PUBLISHED', v.days, { label: v.label, attempt_no: 1 });
+      }
+    });
+    const s: SopDoc = {
+      code,
+      title: versions.find((v) => v.state === 'PUBLISHED')?.title ?? versions[versions.length - 1].title,
+      owner_id: author,
+      category_id: cats[cat],
+      published_version_id: publishedId,
+      active_version_id: activeId,
+      published,
+      active,
+      last_revision_no: Math.max(...versions.map((v) => v.rev)),
+      created_at: daysAgo(60),
+      updated_at: daysAgo(lastChange),
+    };
+    batch.create(db.collection(C.sops).doc(sopId), s);
+    batch.create(db.collection(C.sopCodes).doc(code), { sop_id: sopId });
+    auditEv(sopId, vids[0], author, 'SOP_CREATED', 60, { code, title });
+    return { sopId, vids };
+  }
+
+  const salTitle = 'รับคำขอใบเสนอราคา (RFQ) และออกใบเสนอราคา';
+  sop('SOP-SAL-001', salTitle, 'sales', [
+    { rev: 1, title: salTitle, content: salContent(false), state: 'SUPERSEDED', label: '1.0', days: 50, supersededDays: 12 },
+    {
+      rev: 2,
+      title: salTitle,
+      content: salContent(true),
       state: 'PUBLISHED',
       label: '1.1',
-      daysAgo: 12,
+      days: 12,
       note: 'ลดระยะเวลาตอบกลับลูกค้าเหลือ 2 วันทำการ และเพิ่มตัวชี้วัด',
-    });
+    },
+  ]);
+  const purTitle = 'สั่งซื้อสินค้าและติดตามซัพพลายเออร์';
+  sop('SOP-PUR-001', purTitle, 'purchasing', [
+    { rev: 1, title: purTitle, content: purContent(), state: 'PUBLISHED', label: '1.0', days: 30 },
+  ]);
+  const wh1Title = 'รับเข้า ตรวจสอบ และจัดเก็บสินค้าในคลัง';
+  sop('SOP-WH-001', wh1Title, 'warehouse', [
+    { rev: 1, title: wh1Title, content: wh1Content(), state: 'PUBLISHED', label: '1.0', days: 21 },
+  ]);
+  const wh2Title = 'หยิบ แพ็ค และจัดส่งสินค้า';
+  sop('SOP-WH-002', wh2Title, 'warehouse', [{ rev: 1, title: wh2Title, content: wh2Content(), state: 'DRAFT', days: 2 }]);
 
-    // ── SOP-PUR-001 / SOP-WH-001: published 1.0 ──
-    const pur = await sop('SOP-PUR-001', 'สั่งซื้อสินค้าและติดตามซัพพลายเออร์', 'purchasing');
-    await version(pur, 1, 'สั่งซื้อสินค้าและติดตามซัพพลายเออร์', purContent(), { state: 'PUBLISHED', label: '1.0', daysAgo: 30 });
-    const wh1 = await sop('SOP-WH-001', 'รับเข้า ตรวจสอบ และจัดเก็บสินค้าในคลัง', 'warehouse');
-    await version(wh1, 1, 'รับเข้า ตรวจสอบ และจัดเก็บสินค้าในคลัง', wh1Content(), { state: 'PUBLISHED', label: '1.0', daysAgo: 21 });
-
-    // ── SOP-WH-002: draft ──
-    const wh2 = await sop('SOP-WH-002', 'หยิบ แพ็ค และจัดส่งสินค้า', 'warehouse');
-    await version(wh2, 1, 'หยิบ แพ็ค และจัดส่งสินค้า', wh2Content(), { state: 'DRAFT', daysAgo: 2 });
-
-    // ── SOP-IMP-001: in review, 2nd attempt (1st rejected by the reviewer) ──
-    const imp = await sop('SOP-IMP-001', 'เตรียมเอกสารนำเข้าสินค้าและตรวจสอบความถูกต้อง', 'import');
-    const impV = await version(imp, 1, 'เตรียมเอกสารนำเข้าสินค้าและตรวจสอบความถูกต้อง', impContent(), {
+  // SOP-IMP-001: in review, 2nd attempt (1st rejected by the reviewer)
+  const impTitle = 'เตรียมเอกสารนำเข้าสินค้าและตรวจสอบความถูกต้อง';
+  const imp = sop('SOP-IMP-001', impTitle, 'import', [
+    {
+      rev: 1,
+      title: impTitle,
+      content: impContent(),
       state: 'IN_REVIEW',
-      daysAgo: 1,
+      days: 1,
+      attempts: 2,
       note: 'เพิ่มขั้นตอนตรวจร่างใบขนสินค้าตามที่ผู้ตรวจทานแนะนำ',
-    });
-    await q.query(
-      `insert into approval_steps (version_id, attempt_no, step_no, step_type, assignee_id, state, comment, decided_by, decided_at, created_at)
-       values ($1, 1, 1, 'REVIEW', $2, 'REJECTED', 'กรุณาเพิ่มขั้นตอนตรวจร่างใบขนสินค้าก่อนยื่น และระบุเอกสารแนบให้ครบ', $2, now() - interval '3 days', now() - interval '4 days'),
-              ($1, 1, 2, 'APPROVE', $3, 'CANCELLED', '', null, null, now() - interval '4 days'),
-              ($1, 2, 1, 'REVIEW', $2, 'PENDING', '', null, null, now() - interval '1 day'),
-              ($1, 2, 2, 'APPROVE', $3, 'WAITING', '', null, null, now() - interval '1 day')`,
-      [impV, reviewer, approver],
-    );
-    await q.query(
-      `insert into audit_events (actor_id, sop_id, version_id, event_type, metadata, created_at) values
-         ($1, $3, $4, 'SUBMITTED', '{"attempt_no":1}', now() - interval '4 days'),
-         ($2, $3, $4, 'REVIEW_REJECTED', '{"attempt_no":1}', now() - interval '3 days'),
-         ($1, $3, $4, 'SUBMITTED', '{"attempt_no":2}', now() - interval '1 day')`,
-      [author, reviewer, imp, impV],
-    );
-  });
+    },
+  ]);
+  const impV = imp.vids[0];
+  step(imp.sopId, impV, 1, 1, 'REJECTED', 3, 'กรุณาเพิ่มขั้นตอนตรวจร่างใบขนสินค้าก่อนยื่น และระบุเอกสารแนบให้ครบ');
+  step(imp.sopId, impV, 1, 2, 'CANCELLED', 3);
+  step(imp.sopId, impV, 2, 1, 'PENDING', 0);
+  step(imp.sopId, impV, 2, 2, 'WAITING', 0);
+  auditEv(imp.sopId, impV, author, 'SUBMITTED', 4, { attempt_no: 1 });
+  auditEv(imp.sopId, impV, reviewer, 'REVIEW_REJECTED', 3, { attempt_no: 1 });
+  auditEv(imp.sopId, impV, author, 'SUBMITTED', 1, { attempt_no: 2 });
+
+  await batch.commit();
 }
 
 // ── Demo content ──────────────────────────────────────────────────────

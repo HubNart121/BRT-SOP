@@ -1,17 +1,17 @@
 import { requireUser } from '@/lib/server/auth';
-import { getDb } from '@/lib/server/db';
+import { C, getDb, now } from '@/lib/server/db';
 import { route } from '@/lib/server/http';
 import { pendingCount } from '@/lib/server/sops';
 import type { Me } from '@/lib/shared/types';
 
+const LOGIN_TOUCH_MS = 5 * 60_000;
+
 export const GET = route(async (req): Promise<Me> => {
   const user = await requireUser(req);
   const db = await getDb();
-  await db.query(
-    `update app_users set last_login_at = now()
-      where id = $1 and (last_login_at is null or last_login_at < now() - interval '5 minutes')`,
-    [user.id],
-  );
+  const ref = db.collection(C.users).doc(user.id);
+  const last = (await ref.get()).get('last_login_at');
+  if (!last || Date.now() - last.toMillis() > LOGIN_TOUCH_MS) await ref.update({ last_login_at: now() });
   return {
     id: user.id,
     email: user.email,

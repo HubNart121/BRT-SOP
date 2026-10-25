@@ -34,7 +34,8 @@ const BLOCK_TYPES = new Set([
   'youtube',
 ]);
 
-export const MAX_DOC_BYTES = 1_000_000;
+/** UTF-8 bytes of the content JSON (Firestore documents are limited to 1 MiB in total). */
+export const MAX_DOC_BYTES = 600_000;
 const MAX_NODES = 20_000;
 const MAX_DEPTH = 40;
 export const BLOCK_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;

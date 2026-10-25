@@ -39,12 +39,9 @@ function errorResponse(err: unknown): Response {
   if (err instanceof ContentError) {
     return NextResponse.json({ error: err.message, code: 'INVALID_CONTENT' }, { status: 400 });
   }
-  const pgCode = (err as { code?: string } | null)?.code;
-  if (pgCode === '23505') {
+  // Firestore ALREADY_EXISTS (a uniqueness index document was created concurrently)
+  if ((err as { code?: unknown } | null)?.code === 6) {
     return NextResponse.json({ error: 'ข้อมูลซ้ำกับที่มีอยู่แล้วในระบบ', code: 'DUPLICATE' }, { status: 409 });
-  }
-  if (pgCode === '23514' || pgCode === '22P02') {
-    return NextResponse.json({ error: 'ข้อมูลไม่ถูกต้องตามรูปแบบที่กำหนด', code: 'INVALID' }, { status: 400 });
   }
   console.error('[api] unexpected error', err);
   return NextResponse.json({ error: 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง', code: 'INTERNAL' }, { status: 500 });

@@ -1,10 +1,8 @@
 # Firebase App Hosting — backend configuration
 # https://firebase.google.com/docs/app-hosting/configure
 #
-# Secrets ต้องสร้างและ Grant Access ให้ backend ก่อน Deploy เช่น
-#   firebase apphosting:secrets:set BRT_SOP_DATABASE_URL
-#   firebase apphosting:secrets:set BRT_SOP_ADMIN_EMAIL
-# (คำสั่ง set จะถามว่าจะ grant access ให้ backend หรือไม่ — ตอบ Yes)
+# Data lives in Cloud Firestore of the same project; the backend reaches it (and Firebase Auth)
+# with its own service account — no database password or Secret Manager entry is needed.
 
 runConfig:
   minInstances: 0
@@ -14,19 +12,9 @@ runConfig:
   cpu: 1
 
 env:
-  - variable: DATABASE_URL
-    secret: BRT_SOP_DATABASE_URL
-    availability:
-      - RUNTIME
-
+  # First sign-in of this (verified) e-mail creates the first ADMIN of an empty system.
   - variable: BOOTSTRAP_ADMIN_EMAIL
-    secret: BRT_SOP_ADMIN_EMAIL
-    availability:
-      - RUNTIME
-
-  # จำนวน connection ต่อ instance (maxInstances × DB_POOL_MAX ต้องไม่เกินขีดจำกัดของฐานข้อมูล)
-  - variable: DB_POOL_MAX
-    value: "5"
+    value: "sl@brt.co.th"
     availability:
       - RUNTIME
 

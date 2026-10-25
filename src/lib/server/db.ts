@@ -1,107 +1,173 @@
 import 'server-only';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { Timestamp, type DocumentData, type Firestore } from 'firebase-admin/firestore';
+import type { Role, StepState, StepType, VersionState } from '@/lib/shared/types';
+import { adminDb, usingEmulators } from './firebase-admin';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyRow = any;
+// ═══ Collections ═══════════════════════════════════════════════════════
+// users/{id}                         app users (role, active, linked Firebase uid)
+// userEmails/{email}                 uniqueness index → { user_id }
+// categories/{id} · categorySlugs/{slug}
+// sops/{id} · sopCodes/{CODE}        SOP identity + summary of its published / working version
+// sops/{id}/versions/{versionId}     content per revision
+// sops/{id}/versions/{vid}/diagrams/{blockId}
+// sops/{id}/audit/{autoId}           append-only audit trail of one SOP
+// approvalSteps/{id}                 review / approval steps (queried by assignee)
+// shareLinks/{id}                    public links (token stored as SHA-256)
+// auditEvents/{autoId}               audit events not tied to a SOP (users, categories)
+export const C = {
+  users: 'users',
+  userEmails: 'userEmails',
+  categories: 'categories',
+  categorySlugs: 'categorySlugs',
+  sops: 'sops',
+  sopCodes: 'sopCodes',
+  versions: 'versions',
+  diagrams: 'diagrams',
+  audit: 'audit',
+  steps: 'approvalSteps',
+  shares: 'shareLinks',
+  auditEvents: 'auditEvents',
+} as const;
 
-export interface Queryable {
-  query<T = AnyRow>(text: string, params?: unknown[]): Promise<{ rows: T[] }>;
+export interface UserDoc {
+  email: string;
+  firebase_uid: string | null;
+  full_name: string;
+  role: Role;
+  is_active: boolean;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  last_login_at: Timestamp | null;
 }
 
-export interface Database extends Queryable {
-  kind: 'postgres' | 'pglite';
-  /** Run `fn` inside a single transaction (BEGIN … COMMIT / ROLLBACK). */
-  tx<T>(fn: (q: Queryable) => Promise<T>): Promise<T>;
+export interface VersionSummaryDoc {
+  id: string;
+  state: VersionState;
+  revision_no: number;
+  label: string | null;
+  effective_date: string | null;
+  updated_at: Timestamp;
 }
 
-const globalForDb = globalThis as unknown as { __brtDb?: Promise<Database> };
-
-export function getDb(): Promise<Database> {
-  if (!globalForDb.__brtDb) {
-    globalForDb.__brtDb = createDb().catch((err) => {
-      globalForDb.__brtDb = undefined;
-      throw err;
-    });
-  }
-  return globalForDb.__brtDb;
+export interface SopDoc {
+  code: string;
+  title: string;
+  owner_id: string;
+  category_id: string | null;
+  published_version_id: string | null;
+  active_version_id: string | null;
+  /** Summaries so the library can be listed from the sops collection alone. */
+  published: VersionSummaryDoc | null;
+  active: VersionSummaryDoc | null;
+  last_revision_no: number;
+  created_at: Timestamp;
+  updated_at: Timestamp;
 }
 
-async function createDb(): Promise<Database> {
-  const url = process.env.DATABASE_URL;
-  if (url) return createPostgres(url);
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('DATABASE_URL is not configured');
-  }
-  return createPglite();
+export interface VersionDoc {
+  revision_no: number;
+  version_label: string | null;
+  state: VersionState;
+  title: string;
+  /** Tiptap JSON stored as a string (Firestore limits map/array nesting depth). */
+  content_json: string;
+  content_text: string;
+  change_note: string;
+  major_change: boolean;
+  based_on_version_id: string | null;
+  based_on_label: string | null;
+  row_version: number;
+  last_attempt_no: number;
+  created_by: string;
+  updated_by: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  submitted_at: Timestamp | null;
+  published_at: Timestamp | null;
+  published_by: string | null;
+  effective_date: string | null;
+  superseded_at: Timestamp | null;
 }
 
-async function createPostgres(connectionString: string): Promise<Database> {
-  const pg = await import('pg');
-  const { Pool, types } = pg.default ?? pg;
-  // Keep DATE columns as 'YYYY-MM-DD' strings instead of local-midnight Date objects.
-  types.setTypeParser(1082, (v: string) => v);
-  const pool = new Pool({
-    connectionString,
-    max: Number(process.env.DB_POOL_MAX || 5),
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
-  });
-  pool.on('error', (err: Error) => console.error('[db] idle client error', err));
+export interface StepDoc {
+  sop_id: string;
+  version_id: string;
+  attempt_no: number;
+  step_no: 1 | 2;
+  step_type: StepType;
+  assignee_id: string;
+  state: StepState;
+  comment: string;
+  decided_by: string | null;
+  decided_at: Timestamp | null;
+  created_at: Timestamp;
+}
 
-  return {
-    kind: 'postgres',
-    query: async (text, params) => pool.query(text, params as unknown[]) as Promise<{ rows: AnyRow[] }>,
-    async tx(fn) {
-      const client = await pool.connect();
-      try {
-        await client.query('begin');
-        const result = await fn({
-          query: (text, params) => client.query(text, params as unknown[]) as Promise<{ rows: AnyRow[] }>,
-        });
-        await client.query('commit');
-        return result;
-      } catch (err) {
-        await client.query('rollback').catch(() => undefined);
+export interface DiagramDoc {
+  xml_source: string;
+  preview_png_data: string | null;
+  updated_by: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface CategoryDoc {
+  name: string;
+  slug: string;
+  parent_id: string | null;
+  sort_order: number;
+  created_at: Timestamp;
+}
+
+export const newId = () => randomUUID();
+export const now = () => Timestamp.now();
+
+/** Firestore Timestamp → ISO string (API responses). */
+export function iso(t: Timestamp | null | undefined): string | null {
+  return t ? t.toDate().toISOString() : null;
+}
+
+/** Calendar date in Bangkok (effective dates). */
+export function bangkokDate(d = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(d);
+}
+
+/** Firestore document IDs may not contain "/". */
+export const emailKey = (email: string) => encodeURIComponent(email.toLowerCase());
+
+export function data<T>(snap: { exists: boolean; data(): DocumentData | undefined }): T | null {
+  return snap.exists ? (snap.data() as T) : null;
+}
+
+const globalForDb = globalThis as unknown as { __brtDevSeed?: Promise<void> };
+
+/**
+ * Firestore instance. In `next dev` demo mode the emulator is required and is filled with demo data
+ * the first time it is empty.
+ */
+export async function getDb(): Promise<Firestore> {
+  const db = adminDb();
+  if (process.env.NODE_ENV !== 'production' && process.env.NEXT_PUBLIC_AUTH_MODE === 'dev') {
+    if (!usingEmulators()) {
+      throw new Error(
+        'โหมดทดลองต้องใช้ Firestore Emulator — รัน `npm run emulators` และตั้ง FIRESTORE_EMULATOR_HOST ใน .env.local',
+      );
+    }
+    if (!globalForDb.__brtDevSeed) {
+      globalForDb.__brtDevSeed = (async () => {
+        const any = await db.collection(C.users).limit(1).get();
+        if (any.empty) {
+          console.log('[db] Firestore emulator is empty — loading demo data');
+          const { seedDemoData } = await import('./dev-seed');
+          await seedDemoData(db);
+        }
+      })().catch((err) => {
+        globalForDb.__brtDevSeed = undefined;
         throw err;
-      } finally {
-        client.release();
-      }
-    },
-  };
-}
-
-/** Local development database: embedded Postgres (PGlite) stored in .data/pglite */
-async function createPglite(): Promise<Database> {
-  const { PGlite, types } = await import('@electric-sql/pglite');
-  const { pg_trgm } = await import('@electric-sql/pglite/contrib/pg_trgm');
-  const dataDir = process.env.PGLITE_DATA_DIR || path.join(process.cwd(), '.data', 'pglite');
-  await fs.mkdir(dataDir, { recursive: true });
-  const pg = await PGlite.create({
-    dataDir,
-    extensions: { pg_trgm },
-    parsers: { [types.DATE]: (v: string) => v },
-  });
-
-  const db: Database = {
-    kind: 'pglite',
-    query: (text, params) => pg.query(text, params),
-    tx: (fn) => pg.transaction((t) => fn({ query: (text, params) => t.query(text, params) })),
-  };
-
-  const { rows } = await pg.query<{ t: string | null }>(`select to_regclass('public.app_users')::text as t`);
-  if (!rows[0]?.t) {
-    console.log(`[db] PGlite: creating schema and demo data in ${dataDir}`);
-    const schema = await fs.readFile(path.join(process.cwd(), 'db', 'schema.sql'), 'utf8');
-    await pg.exec(schema);
-    const { seedDemoData } = await import('./dev-seed');
-    await seedDemoData(db);
-  }
-  // Bring an existing local database up to date (migrations are idempotent).
-  const migrationsDir = path.join(process.cwd(), 'db', 'migrations');
-  const files = (await fs.readdir(migrationsDir).catch(() => [] as string[])).filter((f) => f.endsWith('.sql')).sort();
-  for (const file of files) {
-    await pg.exec(await fs.readFile(path.join(migrationsDir, file), 'utf8'));
+      });
+    }
+    await globalForDb.__brtDevSeed;
   }
   return db;
 }

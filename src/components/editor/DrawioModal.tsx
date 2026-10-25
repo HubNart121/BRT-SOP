@@ -7,7 +7,8 @@ import { IconX } from '../icons';
 const DRAWIO_ORIGIN = 'https://embed.diagrams.net';
 const DRAWIO_URL = `${DRAWIO_ORIGIN}/?embed=1&proto=json&spin=1&lang=th&libraries=1&saveAndExit=1&noExitBtn=0`;
 const LOAD_TIMEOUT_MS = 25_000;
-const MAX_PNG_CHARS = 4_500_000;
+/** Previews are stored in Firestore next to the diagram XML (1 MiB per document). */
+const MAX_PNG_CHARS = 600_000;
 const EXPORT = { action: 'export', format: 'png', spinKey: 'saving', border: 12, background: '#ffffff' };
 
 interface Props {
