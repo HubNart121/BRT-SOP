@@ -9,6 +9,13 @@ import { badRequest, conflict, notFound, str, uuid } from './http';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ROLE_ORDER: Record<Role, number> = { ADMIN: 0, APPROVER: 1, REVIEWER: 2, AUTHOR: 3, VIEWER: 4 };
 
+function gmailAddress(value: unknown): string {
+  const email = str(value, 'อีเมล', { max: 254 }).toLowerCase();
+  if (!EMAIL_RE.test(email)) throw badRequest('รูปแบบอีเมลไม่ถูกต้อง');
+  if (!isGmail(email)) throw badRequest('ใช้ได้เฉพาะอีเมล Gmail (@gmail.com)');
+  return email;
+}
+
 function role(value: unknown): Role {
   if (typeof value !== 'string' || !ROLES.includes(value as Role)) throw badRequest('บทบาทไม่ถูกต้อง');
   return value as Role;
@@ -47,9 +54,7 @@ export async function listUsers(user: AuthUser): Promise<AppUserRow[]> {
  */
 export async function inviteUser(user: AuthUser, body: Record<string, unknown>) {
   requireRole(user, 'ADMIN');
-  const email = str(body.email, 'อีเมล', { max: 254 }).toLowerCase();
-  if (!EMAIL_RE.test(email)) throw badRequest('รูปแบบอีเมลไม่ถูกต้อง');
-  if (!isGmail(email)) throw badRequest('เชิญได้เฉพาะอีเมล Gmail (@gmail.com)');
+  const email = gmailAddress(body.email);
   const fullName = str(body.full_name, 'ชื่อ-นามสกุล', { max: 120 });
   const r = role(body.role);
 
@@ -85,6 +90,7 @@ export async function inviteUser(user: AuthUser, body: Record<string, unknown>) 
 export async function updateUser(user: AuthUser, id: string, body: Record<string, unknown>) {
   requireRole(user, 'ADMIN');
   const next = {
+    email: body.email !== undefined ? gmailAddress(body.email) : undefined,
     full_name: body.full_name !== undefined ? str(body.full_name, 'ชื่อ-นามสกุล', { max: 120 }) : undefined,
     role: body.role !== undefined ? role(body.role) : undefined,
     is_active: body.is_active !== undefined ? body.is_active === true : undefined,
@@ -94,6 +100,16 @@ export async function updateUser(user: AuthUser, id: string, body: Record<string
     const ref = db.collection(C.users).doc(id);
     const target = data<UserDoc>(await t.get(ref));
     if (!target) throw notFound('ไม่พบผู้ใช้');
+    const newEmail = next.email !== undefined && next.email !== target.email ? next.email : null;
+    if (newEmail) {
+      // Once linked to a Google account the address is that account's: only a not-yet-used invite can be corrected.
+      if (target.firebase_uid || target.last_login_at) {
+        throw badRequest('เปลี่ยนอีเมลไม่ได้ — ผู้ใช้นี้เข้าระบบด้วยบัญชี Google นี้แล้ว (ถ้าต้องการใช้อีเมลอื่น ให้เชิญใหม่)');
+      }
+      if ((await t.get(db.collection(C.userEmails).doc(emailKey(newEmail)))).exists) {
+        throw conflict('อีเมลนี้มีอยู่ในระบบแล้ว', 'DUPLICATE_EMAIL');
+      }
+    }
     const losesAdmin =
       target.role === 'ADMIN' && target.is_active && ((next.role && next.role !== 'ADMIN') || next.is_active === false);
     if (losesAdmin) {
@@ -106,6 +122,11 @@ export async function updateUser(user: AuthUser, id: string, body: Record<string
     }
     const ts = now();
     const patch: Partial<UserDoc> = { updated_at: ts };
+    if (newEmail) {
+      patch.email = newEmail;
+      t.delete(db.collection(C.userEmails).doc(emailKey(target.email)));
+      t.create(db.collection(C.userEmails).doc(emailKey(newEmail)), { user_id: id });
+    }
     if (next.full_name !== undefined) patch.full_name = next.full_name;
     if (next.role !== undefined) patch.role = next.role;
     if (next.is_active !== undefined) patch.is_active = next.is_active;
@@ -113,6 +134,44 @@ export async function updateUser(user: AuthUser, id: string, body: Record<string
     audit(db, t, { actor: user.id, type: 'USER_UPDATED', meta: { user_id: id, ...next } });
     return { user: userRow(id, { ...target, ...patch }) };
   });
+}
+
+/**
+ * Delete a user that has no history yet (e.g. invited by mistake, or never used the system).
+ * Anyone who owns a SOP, was assigned a review / approval, or has any recorded action is kept
+ * so the audit trail stays complete — suspend them instead.
+ */
+export async function deleteUser(user: AuthUser, id: string) {
+  requireRole(user, 'ADMIN');
+  if (id === user.id) throw badRequest('ลบบัญชีของตนเองไม่ได้');
+  const db = await getDb();
+  const ref = db.collection(C.users).doc(id);
+  await db.runTransaction(async (t) => {
+    const [target, owns, steps, sopActions, otherActions] = await Promise.all([
+      t.get(ref).then((s) => data<UserDoc>(s)),
+      t.get(db.collection(C.sops).where('owner_id', '==', id).limit(1)),
+      t.get(db.collection(C.steps).where('assignee_id', '==', id).limit(1)),
+      // Every action is audited with actor_id: under each SOP (collection group) or globally.
+      t.get(db.collectionGroup(C.audit).where('actor_id', '==', id).limit(1)),
+      t.get(db.collection(C.auditEvents).where('actor_id', '==', id).limit(1)),
+    ]);
+    if (!target) throw notFound('ไม่พบผู้ใช้');
+    if (!owns.empty || !steps.empty || !sopActions.empty || !otherActions.empty) {
+      throw conflict(
+        'ลบไม่ได้ — ผู้ใช้นี้มีประวัติในระบบ (เป็นเจ้าของ SOP ผู้ตรวจ/ผู้อนุมัติ หรือเคยทำรายการ) ' +
+          'ต้องเก็บไว้เป็นหลักฐานการตรวจสอบ ให้ใช้ “ระงับการใช้งาน” แทน',
+        'HAS_HISTORY',
+      );
+    }
+    if (target.role === 'ADMIN' && target.is_active) {
+      const admins = await t.get(db.collection(C.users).where('role', '==', 'ADMIN').where('is_active', '==', true));
+      if (admins.size <= 1) throw badRequest('ต้องมีผู้ดูแลระบบที่ใช้งานอยู่อย่างน้อย 1 คน');
+    }
+    t.delete(ref);
+    t.delete(db.collection(C.userEmails).doc(emailKey(target.email)));
+    audit(db, t, { actor: user.id, type: 'USER_DELETED', meta: { user_id: id, email: target.email, role: target.role } });
+  });
+  return { ok: true };
 }
 
 // ═══ Categories ════════════════════════════════════════════════════════
