@@ -12,27 +12,29 @@ export default function NewSopPage() {
   const { me, api } = useAuth();
   const router = useRouter();
   const cats = useApi<{ categories: Category[] }>('/api/categories');
-  const [code, setCode] = useState('SOP-');
   const [title, setTitle] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The code is issued by the server (SOP-<category code>-<running number>); this is only a preview.
+  const next = useApi<{ code: string }>(categoryId ? `/api/sops/next-code?category=${categoryId}` : null);
 
   const allowed = me?.role === 'ADMIN' || me?.role === 'AUTHOR';
-  const codeValid = /^[A-Z0-9][A-Z0-9-]{1,39}$/.test(code);
+  const noCategories = cats.data?.categories.length === 0;
+  const codePreview = !categoryId ? '' : next.loading ? 'กำลังออกรหัส…' : (next.data?.code ?? '');
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!codeValid) {
-      setError('รหัส SOP ใช้ได้เฉพาะ A-Z, 0-9 และ - เช่น SOP-WH-003');
+    if (!categoryId) {
+      setError('กรุณาเลือกหมวดหมู่ — รหัส SOP ออกตามหมวด');
       return;
     }
     setBusy(true);
     try {
-      const { id } = await api<{ id: string }>('/api/sops', {
+      const { id } = await api<{ id: string; code: string }>('/api/sops', {
         method: 'POST',
-        json: { code, title, categoryId: categoryId || null },
+        json: { title, categoryId },
       });
       router.push(`/sops/${id}`);
     } catch (err) {
@@ -60,19 +62,45 @@ export default function NewSopPage() {
       </header>
 
       <form className="card" style={{ maxWidth: 640, gap: 20 }} onSubmit={submit}>
+        {noCategories && (
+          <div className="alert alert-warn" role="alert">
+            ยังไม่มีหมวดหมู่ — รหัส SOP ออกตามหมวด จึงต้องมีหมวดก่อน
+            {me?.role === 'ADMIN' ? (
+              <>
+                {' '}
+                <Link href="/categories">เพิ่มหมวดหมู่</Link>
+              </>
+            ) : (
+              ' กรุณาติดต่อผู้ดูแลระบบ'
+            )}
+          </div>
+        )}
+        <label className="field">
+          หมวดหมู่
+          <select className="select" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
+            <option value="">— เลือกหมวดหมู่ —</option>
+            {cats.data?.categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field">
           รหัส SOP
           <input
             className="input"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase().replace(/\s+/g, '-'))}
-            placeholder="SOP-WH-003"
-            maxLength={40}
-            required
-            aria-invalid={code.length > 4 && !codeValid}
-            style={{ fontWeight: 600, letterSpacing: '0.02em' }}
+            value={codePreview}
+            readOnly
+            tabIndex={-1}
+            placeholder="เลือกหมวดหมู่ก่อน ระบบจะออกรหัสให้"
+            style={{ fontWeight: 600, letterSpacing: '0.02em', background: 'var(--surface-2)', cursor: 'default' }}
           />
-          <span className="hint">ห้ามซ้ำกับ SOP อื่น · ใช้ได้เฉพาะ A-Z, 0-9 และขีด (-) · แนะนำรูปแบบ SOP-แผนก-ลำดับ</span>
+          {next.error ? (
+            <span className="field-error">{next.error}</span>
+          ) : (
+            <span className="hint">ระบบออกรหัสให้อัตโนมัติ (SOP-รหัสหมวด-ลำดับ) · แก้ไขไม่ได้ · เลขจริงยืนยันตอนกดสร้าง</span>
+          )}
         </label>
         <label className="field">
           ชื่อเอกสาร
@@ -85,17 +113,6 @@ export default function NewSopPage() {
             required
           />
         </label>
-        <label className="field">
-          หมวดหมู่
-          <select className="select" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">— ไม่ระบุ —</option>
-            {cats.data?.categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
         {error && (
           <div className="alert alert-error" role="alert">
             {error}
@@ -105,7 +122,7 @@ export default function NewSopPage() {
           <Link href="/sops" className="btn btn-secondary">
             ยกเลิก
           </Link>
-          <button type="submit" className="btn btn-primary" disabled={busy || !title.trim()}>
+          <button type="submit" className="btn btn-primary" disabled={busy || !title.trim() || !categoryId}>
             {busy ? 'กำลังสร้าง…' : 'สร้างและเริ่มเขียน'}
           </button>
         </div>

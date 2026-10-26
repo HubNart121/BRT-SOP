@@ -14,6 +14,7 @@
 | Editor | Tiptap (หัวข้อ ตัวหนา/เอียง/ขีดเส้นใต้ รายการ กล่องหมายเหตุ ลิงก์ ตาราง) · Ctrl+S บันทึก · กันบันทึกทับกัน (row_version) |
 | Flowchart | draw.io Embed (`embed.diagrams.net`) ผ่าน postMessage ตรวจ `origin` + `source` · เก็บ XML + ภาพ PNG ผูกกับเวอร์ชัน |
 | วิดีโอ YouTube | ปุ่ม “แทรกวิดีโอ” → คลิป (ลิงก์ watch / youtu.be / shorts, ใส่เวลาเริ่ม `t=` ได้) · หัวข้อ · รายละเอียด (ยาวได้ 5,000 ตัวอักษร) · เล่นในหน้า SOP ผ่าน `youtube-nocookie.com` · ค้นหาเจอจากหัวข้อ/รายละเอียด · ตอนพิมพ์แสดงภาพตัวอย่าง + ลิงก์ |
+| รหัส SOP | ระบบออกให้อัตโนมัติตามหมวดที่เลือก: `SOP-<รหัสหมวด>-<ลำดับ>` เช่น `SOP-SALES-001` · ผู้ใช้กรอก/แก้ไม่ได้ · เลขเรียงต่อกันต่อหมวด ไม่ซ้ำและไม่นำกลับมาใช้ (สร้างพร้อมกันก็ไม่ชน) · ย้ายหมวดภายหลัง รหัสคงเดิม |
 | เวอร์ชัน | `revision_no` (r1, r2…) + `version_label` (1.0, 1.1, 2.0) · ฉบับเผยแพร่กับฉบับร่างอยู่คู่กันได้ · ฉบับเก่าเป็น `SUPERSEDED` และแก้ไขไม่ได้ |
 | อนุมัติ | DRAFT → IN_REVIEW → IN_APPROVAL → PUBLISHED · Reject ต้องมีเหตุผลและกลับเป็นร่าง · เก็บ `attempt_no` ทุกครั้ง · Publish ใน Firestore transaction เดียว |
 | สิทธิ์ | ADMIN / AUTHOR / REVIEWER / APPROVER / VIEWER ตรวจที่เซิร์ฟเวอร์ · ผู้ส่งตรวจทาน/อนุมัติงานตัวเองไม่ได้ · ผู้ตรวจกับผู้อนุมัติต้องเป็นคนละคน |
@@ -47,7 +48,7 @@ npm run dev              # เทอร์มินัลที่ 2
 | approver@brt.local | APPROVER |
 | viewer@brt.local | VIEWER |
 
-ข้อมูลตัวอย่าง: SOP-SAL-001 (1.0 → 1.1), SOP-PUR-001, SOP-WH-001 (เผยแพร่), SOP-WH-002 (ร่าง), SOP-IMP-001 (รอตรวจ ครั้งที่ 2)
+ข้อมูลตัวอย่าง: SOP-SALES-001 (1.0 → 1.1), SOP-PURCHASING-001, SOP-WAREHOUSE-001 (เผยแพร่), SOP-WAREHOUSE-002 (ร่าง), SOP-IMPORT-001 (รอตรวจ ครั้งที่ 2)
 ข้อมูลใน emulator เก็บไว้ที่ `.data/emulators` เมื่อปิด emulator · ล้างข้อมูล (ปิด emulator ก่อน): `npm run emulators:reset`
 
 > โหมดทดลองปิดตัวเองอัตโนมัติใน production build (`NODE_ENV=production`) — แม้ตั้ง `NEXT_PUBLIC_AUTH_MODE=dev` ไว้ก็ใช้ไม่ได้
@@ -83,7 +84,7 @@ src/lib/shared/            types, labels, content (ตรวจ/แปลงเ�
 |---|---|
 | `users`, `userEmails` | ผู้ใช้ + ดัชนีกันอีเมลซ้ำ |
 | `categories`, `categorySlugs` | หมวดหมู่ + ดัชนีกันรหัสซ้ำ |
-| `sops`, `sopCodes` | ตัว SOP (สรุปฉบับเผยแพร่/ฉบับร่าง) + ดัชนีกันรหัส SOP ซ้ำ |
+| `sops`, `sopCodes`, `sopCodeCounters` | ตัว SOP (สรุปฉบับเผยแพร่/ฉบับร่าง) + ดัชนีกันรหัส SOP ซ้ำ + เลขล่าสุดที่ออกไปของแต่ละ `SOP-<รหัสหมวด>` |
 | `sops/{id}/versions`, `…/diagrams`, `sops/{id}/audit` | เนื้อหาแต่ละเวอร์ชัน · Flowchart · ประวัติกิจกรรม |
 | `approvalSteps`, `shareLinks`, `auditEvents` | ขั้นตรวจ/อนุมัติ · ลิงก์แชร์ · กิจกรรมด้านผู้ใช้/หมวด |
 
@@ -98,7 +99,8 @@ src/lib/shared/            types, labels, content (ตรวจ/แปลงเ�
 | GET, POST | `/api/users` · PATCH `/api/users/:id` | รายชื่อ / เชิญ / แก้บทบาท-สถานะ (ADMIN) |
 | GET, POST | `/api/categories` | อ่าน / เพิ่มหมวด (ADMIN) |
 | PATCH, DELETE | `/api/categories/:id` | แก้ไขหมวด · ลบหมวด (`{ move_to }` = หมวดที่จะย้าย SOP ไป หรือ `null`) (ADMIN) |
-| GET, POST | `/api/sops?q=&category=` | ค้นหา / สร้าง SOP |
+| GET, POST | `/api/sops?q=&category=` | ค้นหา / สร้าง SOP (`{ title, categoryId }` — รหัสออกโดยระบบ) |
+| GET | `/api/sops/next-code?category=` | ดูรหัสที่ SOP ถัดไปในหมวดนี้จะได้ (ยังไม่จองเลข) |
 | GET | `/api/sops/:id?version=` | SOP + เวอร์ชันที่มีสิทธิ์เห็น |
 | POST | `/api/sops/:id/revisions` | สร้างฉบับร่างจากฉบับเผยแพร่ |
 | PATCH | `/api/sops/:id/versions/:versionId` | บันทึกร่าง |

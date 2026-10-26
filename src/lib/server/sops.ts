@@ -1,5 +1,5 @@
 import 'server-only';
-import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import { FieldPath, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import { BLOCK_ID_RE, MAX_DOC_BYTES, diagramIds, docToText, sanitizeDoc, sopTemplate } from '@/lib/shared/content';
 import type {
   ApprovalStep,
@@ -44,7 +44,6 @@ import {
 import { HttpError, badRequest, conflict, forbidden, notFound, str, uuid } from './http';
 
 const ACTIVE_STATES: VersionState[] = ['DRAFT', 'IN_REVIEW', 'IN_APPROVAL'];
-const CODE_RE = /^[A-Z0-9][A-Z0-9-]{1,39}$/;
 /** Firestore documents are limited to 1 MiB, so content + search text stay well below it. */
 const MAX_TEXT_BYTES = 200_000;
 
@@ -303,25 +302,68 @@ export async function getSopDetail(user: AuthUser, sopId: string, versionId?: st
   };
 }
 
+// ═══ Codes ═════════════════════════════════════════════════════════════
+// SOP codes are issued by the system — SOP-<CATEGORY CODE>-<running number>, e.g. SOP-SALES-001 —
+// and never typed or changed by users. A code stays with its SOP even if the category changes later.
+
+const codePrefix = (categorySlug: string) => `SOP-${categorySlug.toUpperCase()}`;
+const formatCode = (prefix: string, n: number) => `${prefix}-${String(n).padStart(3, '0')}`;
+
+/** Highest running number issued under `prefix`. Read inside `t` when given, so concurrent creates are serialized. */
+async function lastIssuedNumber(db: Firestore, prefix: string, t?: Transaction): Promise<number> {
+  const counterRef = db.collection(C.sopCodeCounters).doc(prefix);
+  const counter = t ? await t.get(counterRef) : await counterRef.get();
+  if (counter.exists) return Number(counter.get('last')) || 0;
+  // No counter yet: continue after codes that already use this prefix ('.' is the character after '-').
+  const existing = db
+    .collection(C.sopCodes)
+    .where(FieldPath.documentId(), '>=', `${prefix}-`)
+    .where(FieldPath.documentId(), '<', `${prefix}.`);
+  const snap = t ? await t.get(existing) : await existing.get();
+  let max = 0;
+  for (const d of snap.docs) {
+    const rest = d.id.slice(prefix.length + 1);
+    if (/^\d+$/.test(rest)) max = Math.max(max, Number(rest));
+  }
+  return max;
+}
+
+async function categoryForCode(db: Firestore, categoryId: string, t?: Transaction): Promise<CategoryDoc> {
+  const ref = db.collection(C.categories).doc(categoryId);
+  const cat = data<CategoryDoc>(t ? await t.get(ref) : await ref.get());
+  if (!cat) throw badRequest('ไม่พบหมวดหมู่ที่เลือก');
+  return cat;
+}
+
+/** The code the next SOP in this category would get (a preview — the number is fixed only when the SOP is created). */
+export async function nextSopCode(user: AuthUser, categoryId: string): Promise<{ code: string }> {
+  if (!canCreateSop(user)) throw forbidden('เฉพาะผู้เขียนหรือผู้ดูแลระบบที่สร้าง SOP ได้');
+  const db = await getDb();
+  const prefix = codePrefix((await categoryForCode(db, categoryId)).slug);
+  return { code: formatCode(prefix, (await lastIssuedNumber(db, prefix)) + 1) };
+}
+
 // ═══ Create ════════════════════════════════════════════════════════════
 
-export async function createSop(user: AuthUser, body: Record<string, unknown>): Promise<{ id: string }> {
+export async function createSop(user: AuthUser, body: Record<string, unknown>): Promise<{ id: string; code: string }> {
   if (!canCreateSop(user)) throw forbidden('เฉพาะผู้เขียนหรือผู้ดูแลระบบที่สร้าง SOP ได้');
-  const code = str(body.code, 'รหัส SOP', { max: 40 }).toUpperCase();
-  if (!CODE_RE.test(code)) throw badRequest('รหัส SOP ใช้ได้เฉพาะ A-Z, 0-9 และ - เช่น SOP-WH-003');
   const title = str(body.title, 'ชื่อเอกสาร', { max: 200 });
-  const categoryId = body.categoryId ? uuid(body.categoryId, 'หมวดหมู่') : null;
+  if (!body.categoryId) throw badRequest('กรุณาเลือกหมวดหมู่ (รหัส SOP ออกตามหมวด)');
+  const categoryId = uuid(body.categoryId, 'หมวดหมู่');
 
   const db = await getDb();
   const sopId = newId();
   const versionId = newId();
-  await db.runTransaction(async (t) => {
-    const [codeSnap, catSnap] = await Promise.all([
-      t.get(db.collection(C.sopCodes).doc(code)),
-      categoryId ? t.get(db.collection(C.categories).doc(categoryId)) : null,
-    ]);
-    if (codeSnap.exists) throw conflict(`รหัส ${code} มีอยู่ในระบบแล้ว`, 'DUPLICATE_CODE');
-    if (catSnap && !catSnap.exists) throw badRequest('ไม่พบหมวดหมู่ที่เลือก');
+  const issued = await db.runTransaction(async (t) => {
+    const prefix = codePrefix((await categoryForCode(db, categoryId, t)).slug);
+    const counterRef = db.collection(C.sopCodeCounters).doc(prefix);
+    let n = (await lastIssuedNumber(db, prefix, t)) + 1;
+    let code = formatCode(prefix, n);
+    // Safety net: skip numbers whose code already exists (e.g. typed by hand before auto-numbering).
+    for (let tries = 0; (await t.get(db.collection(C.sopCodes).doc(code))).exists; tries++) {
+      if (tries >= 50) throw conflict('ออกรหัส SOP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'CODE_EXHAUSTED');
+      code = formatCode(prefix, ++n);
+    }
 
     const ts = now();
     const content = sopTemplate();
@@ -361,12 +403,14 @@ export async function createSop(user: AuthUser, body: Record<string, unknown>): 
       created_at: ts,
       updated_at: ts,
     };
+    t.set(counterRef, { last: n, updated_at: ts });
     t.create(db.collection(C.sopCodes).doc(code), { sop_id: sopId });
     t.create(sopRef(db, sopId), sop);
     t.create(versionRef(db, sopId, versionId), version);
     audit(db, t, { actor: user.id, sop: sopId, version: versionId, type: 'SOP_CREATED', meta: { code, title } });
+    return code;
   });
-  return { id: sopId };
+  return { id: sopId, code: issued };
 }
 
 // ═══ Draft editing ═════════════════════════════════════════════════════

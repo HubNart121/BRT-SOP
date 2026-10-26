@@ -359,6 +359,11 @@ function SopDocument({ detail, reload }: { detail: SopDetail; reload: () => void
                 ) : (
                   sop.category?.name ?? '—'
                 )}
+                {editable && categoryId !== (sop.category?.id ?? '') && (
+                  <span className="hint" style={{ display: 'block', marginTop: 4 }}>
+                    รหัส {sop.code} คงเดิม (รหัส SOP ไม่เปลี่ยนตามหมวด)
+                  </span>
+                )}
               </dd>
               <dt>เจ้าของ</dt>
               <dd>{displayName(sop.owner)}</dd>

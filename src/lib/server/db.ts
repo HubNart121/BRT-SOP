@@ -9,6 +9,7 @@ import { adminDb, usingEmulators } from './firebase-admin';
 // userEmails/{email}                 uniqueness index → { user_id }
 // categories/{id} · categorySlugs/{slug}
 // sops/{id} · sopCodes/{CODE}        SOP identity + summary of its published / working version
+// sopCodeCounters/{PREFIX}           last running number issued per code prefix (SOP-<CATEGORY CODE>)
 // sops/{id}/versions/{versionId}     content per revision
 // sops/{id}/versions/{vid}/diagrams/{blockId}
 // sops/{id}/audit/{autoId}           append-only audit trail of one SOP
@@ -22,6 +23,7 @@ export const C = {
   categorySlugs: 'categorySlugs',
   sops: 'sops',
   sopCodes: 'sopCodes',
+  sopCodeCounters: 'sopCodeCounters',
   versions: 'versions',
   diagrams: 'diagrams',
   audit: 'audit',

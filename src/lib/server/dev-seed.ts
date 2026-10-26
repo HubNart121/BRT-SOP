@@ -177,7 +177,7 @@ export async function seedDemoData(db: Firestore): Promise<void> {
   }
 
   const salTitle = 'รับคำขอใบเสนอราคา (RFQ) และออกใบเสนอราคา';
-  sop('SOP-SAL-001', salTitle, 'sales', [
+  sop('SOP-SALES-001', salTitle, 'sales', [
     { rev: 1, title: salTitle, content: salContent(false), state: 'SUPERSEDED', label: '1.0', days: 50, supersededDays: 12 },
     {
       rev: 2,
@@ -190,19 +190,19 @@ export async function seedDemoData(db: Firestore): Promise<void> {
     },
   ]);
   const purTitle = 'สั่งซื้อสินค้าและติดตามซัพพลายเออร์';
-  sop('SOP-PUR-001', purTitle, 'purchasing', [
+  sop('SOP-PURCHASING-001', purTitle, 'purchasing', [
     { rev: 1, title: purTitle, content: purContent(), state: 'PUBLISHED', label: '1.0', days: 30 },
   ]);
   const wh1Title = 'รับเข้า ตรวจสอบ และจัดเก็บสินค้าในคลัง';
-  sop('SOP-WH-001', wh1Title, 'warehouse', [
+  sop('SOP-WAREHOUSE-001', wh1Title, 'warehouse', [
     { rev: 1, title: wh1Title, content: wh1Content(), state: 'PUBLISHED', label: '1.0', days: 21 },
   ]);
   const wh2Title = 'หยิบ แพ็ค และจัดส่งสินค้า';
-  sop('SOP-WH-002', wh2Title, 'warehouse', [{ rev: 1, title: wh2Title, content: wh2Content(), state: 'DRAFT', days: 2 }]);
+  sop('SOP-WAREHOUSE-002', wh2Title, 'warehouse', [{ rev: 1, title: wh2Title, content: wh2Content(), state: 'DRAFT', days: 2 }]);
 
-  // SOP-IMP-001: in review, 2nd attempt (1st rejected by the reviewer)
+  // SOP-IMPORT-001: in review, 2nd attempt (1st rejected by the reviewer)
   const impTitle = 'เตรียมเอกสารนำเข้าสินค้าและตรวจสอบความถูกต้อง';
-  const imp = sop('SOP-IMP-001', impTitle, 'import', [
+  const imp = sop('SOP-IMPORT-001', impTitle, 'import', [
     {
       rev: 1,
       title: impTitle,
