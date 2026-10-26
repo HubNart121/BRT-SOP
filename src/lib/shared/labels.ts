@@ -50,6 +50,7 @@ export const AUDIT_LABEL: Record<string, string> = {
   SUPERSEDED: 'ถูกแทนที่ด้วยฉบับใหม่',
   SHARE_LINK_CREATED: 'สร้างลิงก์แชร์',
   SHARE_LINK_REVOKED: 'ยกเลิกลิงก์แชร์',
+  CATEGORY_CHANGED: 'ย้ายหมวดหมู่ (ลบหมวดเดิม)',
 };
 
 /** Short label for a version: "1.1" for published ones, "r4" for working revisions. */
