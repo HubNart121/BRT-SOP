@@ -5,6 +5,30 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "BRT SOP Center",
+        "supportEmail": "sl@brt.co.th"
+      }
+    }
+  },
+  "apphosting": {
+    "backendId": "brt-sop",
+    "rootDir": "/",
+    "ignore": [
+      "node_modules",
+      ".git",
+      ".next",
+      ".data",
+      ".env",
+      ".env.local",
+      ".env.development.local",
+      ".env.production.local",
+      "firebase-debug.log",
+      "firestore-debug.log"
+    ]
+  },
   "emulators": {
     "auth": {
       "host": "127.0.0.1",

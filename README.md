@@ -112,26 +112,34 @@ src/lib/shared/            types, labels, content (ตรวจ/แปลงเ�
 
 ## Deploy ขึ้น Firebase (project `brt-sop-center`)
 
-ค่าที่ตั้งไว้แล้วในโค้ด: Web SDK config + `BOOTSTRAP_ADMIN_EMAIL` (`apphosting.yaml`)
+เว็บ: **https://brt-sop--brt-sop-center.asia-southeast1.hosted.app** (App Hosting backend `brt-sop`, asia-southeast1)
+
+ค่าที่ตั้งไว้แล้วในโค้ด: Web SDK config + `BOOTSTRAP_ADMIN_EMAIL` (`apphosting.yaml`) · Google sign-in + backend + รายการไฟล์ที่ไม่อัปโหลด (`firebase.json`)
 
 ```bash
-# 1) สร้าง Firestore (ครั้งเดียว) และ deploy rules
-firebase firestore:databases:create "(default)" --location asia-southeast1 --project brt-sop-center
-firebase deploy --only firestore --project brt-sop-center
-
-# 2) สร้าง App Hosting backend (เชื่อม GitHub repo, branch main, root "/")
-firebase apphosting:backends:create --project brt-sop-center --backend brt-sop \
-  --primary-region asia-southeast1 --app 1:959139949716:web:f8363219ebbf0b47329881 --root-dir /
+# Deploy ทุกอย่างจากเครื่อง: Firestore rules/indexes · เปิด Google sign-in · build + rollout แอป
+firebase deploy --only firestore,auth,apphosting --project brt-sop-center
 ```
 
-หลังจากนั้นทุกครั้งที่ push ขึ้น `main` จะ Deploy อัตโนมัติ · ดูสถานะ/URL `*.hosted.app` ที่ Firebase Console → App Hosting
+`apphosting` อัปโหลดซอร์สจากเครื่อง (ข้ามไฟล์ใน `.gitignore` และ `ignore` ของ `firebase.json` เช่น `.env.local`) แล้ว build บน Cloud Build ·
+ถ้าต้องการให้ push ขึ้น `main` แล้ว deploy อัตโนมัติ ให้เชื่อม GitHub repo ที่ Firebase Console → App Hosting → `brt-sop` → Settings
 
-**ใน Firebase Console:**
-- **Authentication → Sign-in method → Google** → **Enable** และเลือก support email · ถ้าเคยเปิด **Email/Password** ไว้ ให้ปิด
-  (`firebase deploy` เปิด/ปิด provider ให้ไม่ได้ — แต่ถึงลืมปิด เซิร์ฟเวอร์ก็ปฏิเสธ token ที่ไม่ได้มาจาก Google อยู่แล้ว)
-- **Authentication → Settings → Authorized domains** → เพิ่มโดเมน `*.hosted.app` ของ backend (และโดเมนจริงถ้ามี) —
-  ถ้าไม่เพิ่ม ปุ่ม Google จะขึ้น “โดเมนนี้ยังไม่ได้รับอนุญาต”
-- **Authentication → Settings → User actions** → ต้อง **เปิด “Enable create (sign-up)” ไว้** (ค่าเริ่มต้น) — ผู้ถูกเชิญได้บัญชี Firebase ตอนกดปุ่ม Google ครั้งแรก ·
+<details><summary>ตั้งค่าครั้งแรก (ทำไปแล้วสำหรับ <code>brt-sop-center</code>)</summary>
+
+```bash
+firebase firestore:databases:create "(default)" --location asia-southeast1 --project brt-sop-center
+firebase apphosting:backends:create --project brt-sop-center --backend brt-sop \
+  --primary-region asia-southeast1 --app 1:959139949716:web:f8363219ebbf0b47329881 --root-dir / --non-interactive
+```
+
+</details>
+
+**Firebase Authentication (ตั้งแล้ว — ตรวจได้ที่ Console → Authentication):**
+- **Sign-in method:** Google เปิด (จาก `firebase deploy --only auth`) · Email/Password **ปิด** — `firebase deploy` ปิด provider ให้ไม่ได้ ต้องปิดใน Console
+  (ถึงเปิดไว้ เซิร์ฟเวอร์ก็ปฏิเสธ token ที่ไม่ได้มาจาก Google อยู่แล้ว)
+- **Settings → Authorized domains:** มี `brt-sop--brt-sop-center.asia-southeast1.hosted.app` แล้ว — ถ้าผูกโดเมนจริงเพิ่ม ต้องเพิ่มโดเมนนั้นด้วย
+  ไม่งั้นปุ่ม Google จะขึ้น “โดเมนนี้ยังไม่ได้รับอนุญาต”
+- **Settings → User actions:** ต้อง **เปิด “Enable create (sign-up)” ไว้** (ค่าเริ่มต้น) — ผู้ถูกเชิญได้บัญชี Firebase ตอนกดปุ่ม Google ครั้งแรก ·
   คนที่ไม่ได้รับเชิญอาจมีบัญชีใน Firebase ได้ แต่เข้าระบบไม่ได้ (API ตอบ 403)
 - **ผู้ดูแลคนแรก:** เปิดเว็บ → “เข้าสู่ระบบด้วย Google” ด้วย `sl@brt.co.th` → ได้สิทธิ์ ADMIN พร้อมหมวดหมู่เริ่มต้น 4 หมวด ·
   อีเมลนี้ต้องเป็นบัญชี Google (Google Workspace ของบริษัท หรือบัญชี Google ที่สร้างด้วยอีเมลนี้) — เป็นอีเมลเดียวที่ไม่ใช่ Gmail ที่เข้าระบบได้
