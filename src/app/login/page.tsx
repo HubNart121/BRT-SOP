@@ -1,8 +1,8 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState, type FormEvent } from 'react';
-import { firebaseErrorMessage, useAuth } from '@/components/AuthProvider';
+import { Suspense, useEffect, useState } from 'react';
+import { firebaseErrorMessage, isPopupDismissed, useAuth } from '@/components/AuthProvider';
 import { IconCheck } from '@/components/icons';
 import { initials } from '@/components/ui';
 import { DEV_AUTH } from '@/lib/client/firebase';
@@ -56,102 +56,70 @@ function LoginCard() {
     <div className="login-card">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img className="logo" src="/brand/logo-full.png" alt="BRT SOP Center" width={210} height={160} />
-      {auth.status === 'blocked' ? <Blocked /> : DEV_AUTH ? <DevLogin /> : <PasswordLogin />}
+      {auth.status === 'blocked' ? <Blocked /> : DEV_AUTH ? <DevLogin /> : <GoogleLogin />}
     </div>
   );
 }
 
-function PasswordLogin() {
-  const { signIn, resetPassword } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+function GoogleLogin() {
+  const { signIn } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  async function start() {
     setError(null);
-    setInfo(null);
     setBusy(true);
     try {
-      await signIn(email, password);
+      await signIn();
     } catch (err) {
-      setError(firebaseErrorMessage(err));
+      if (!isPopupDismissed(err)) setError(firebaseErrorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
-  async function forgot() {
-    setError(null);
-    setInfo(null);
-    if (!email.trim()) {
-      setError('กรอกอีเมลก่อน แล้วกด "ลืมรหัสผ่าน?" อีกครั้ง');
-      return;
-    }
-    try {
-      await resetPassword(email);
-      setInfo('หากอีเมลนี้มีอยู่ในระบบ จะได้รับลิงก์สำหรับตั้งรหัสผ่านใหม่ภายในไม่กี่นาที');
-    } catch (err) {
-      setError(firebaseErrorMessage(err));
-    }
-  }
-
   return (
-    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }} noValidate>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="head">
         <h2>เข้าสู่ระบบ</h2>
-        <p className="muted small">ใช้อีเมลที่บริษัทเชิญเข้าระบบ</p>
+        <p className="muted small">ใช้บัญชี Gmail ที่ผู้ดูแลระบบเชิญเข้าระบบ</p>
       </div>
-      <label className="field">
-        อีเมล
-        <input
-          className="input"
-          type="email"
-          autoComplete="email"
-          placeholder="name@company.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-      </label>
-      <label className="field">
-        รหัสผ่าน
-        <input
-          className="input"
-          type="password"
-          autoComplete="current-password"
-          placeholder="••••••••"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-      </label>
       {error && (
         <div className="alert alert-error" role="alert">
           {error}
         </div>
       )}
-      {info && (
-        <div className="alert alert-info" role="status">
-          {info}
-        </div>
-      )}
-      <button type="submit" className="btn btn-primary btn-block" style={{ height: 48, fontSize: 16 }} disabled={busy}>
-        {busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
+      <button
+        type="button"
+        className="btn btn-secondary btn-block"
+        style={{ height: 48, fontSize: 16, gap: 12 }}
+        onClick={() => void start()}
+        disabled={busy}
+      >
+        <GoogleLogo />
+        {busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบด้วย Google'}
       </button>
-      <button type="button" className="btn-link" style={{ alignSelf: 'center' }} onClick={forgot}>
-        ลืมรหัสผ่าน?
-      </button>
-    </form>
+      <p className="small muted" style={{ textAlign: 'center', margin: 0 }}>
+        รับเฉพาะ @gmail.com · ไม่ต้องใช้รหัสผ่าน
+      </p>
+    </div>
+  );
+}
+
+/** Google "G" mark for the sign-in button (Google sign-in branding guidelines). */
+function GoogleLogo() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
   );
 }
 
 function Blocked() {
-  const { blocked, signOut, resendVerification, recheck } = useAuth();
-  const [msg, setMsg] = useState<string | null>(null);
-  const needsVerify = blocked?.code === 'EMAIL_NOT_VERIFIED';
+  const { blocked, signOut } = useAuth();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div className="head">
@@ -160,31 +128,9 @@ function Blocked() {
       <div className="alert alert-warn" role="alert">
         {blocked?.message}
       </div>
-      {needsVerify && (
-        <>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={async () => {
-              try {
-                await resendVerification();
-                setMsg('ส่งอีเมลยืนยันแล้ว กรุณาเปิดลิงก์ในอีเมล แล้วกด "ตรวจสอบอีกครั้ง"');
-              } catch (err) {
-                setMsg(firebaseErrorMessage(err));
-              }
-            }}
-          >
-            ส่งอีเมลยืนยันตัวตน
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={() => void recheck()}>
-            ตรวจสอบอีกครั้ง
-          </button>
-        </>
-      )}
-      {msg && <div className="alert alert-info">{msg}</div>}
       {blocked?.code !== 'NOT_CONFIGURED' && (
-        <button type="button" className="btn-link" style={{ alignSelf: 'center' }} onClick={() => void signOut()}>
-          ใช้บัญชีอื่น
+        <button type="button" className="btn btn-secondary" onClick={() => void signOut()}>
+          เลือกบัญชี Google อื่น
         </button>
       )}
     </div>

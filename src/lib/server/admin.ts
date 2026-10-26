@@ -1,9 +1,9 @@
 import 'server-only';
+import { isGmail } from '@/lib/shared/email';
 import { ROLES, type AppUserRow, type Category, type Role } from '@/lib/shared/types';
 import { audit } from './access';
-import { devAuthEnabled, requireRole, type AuthUser } from './auth';
+import { requireRole, type AuthUser } from './auth';
 import { C, data, emailKey, getDb, iso, newId, now, type CategoryDoc, type SopDoc, type UserDoc } from './db';
-import { adminAuth } from './firebase-admin';
 import { badRequest, conflict, notFound, str, uuid } from './http';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -49,44 +49,13 @@ export async function inviteUser(user: AuthUser, body: Record<string, unknown>) 
   requireRole(user, 'ADMIN');
   const email = str(body.email, 'อีเมล', { max: 254 }).toLowerCase();
   if (!EMAIL_RE.test(email)) throw badRequest('รูปแบบอีเมลไม่ถูกต้อง');
+  if (!isGmail(email)) throw badRequest('เชิญได้เฉพาะอีเมล Gmail (@gmail.com)');
   const fullName = str(body.full_name, 'ชื่อ-นามสกุล', { max: 120 });
   const r = role(body.role);
 
   const db = await getDb();
   if ((await db.collection(C.userEmails).doc(emailKey(email)).get()).exists) {
     throw conflict('อีเมลนี้มีอยู่ในระบบแล้ว', 'DUPLICATE_EMAIL');
-  }
-
-  let firebaseUid: string | null = null;
-  let warning: string | null = null;
-  /** created: new account (password set via reset e-mail) · linked: existing verified account · unverified / failed: must verify e-mail at first login */
-  let firebaseAccount: 'created' | 'linked' | 'unverified' | 'failed' | 'none' = 'none';
-  if (!devAuthEnabled()) {
-    try {
-      const auth = adminAuth();
-      const existing = await auth.getUserByEmail(email).catch((e: { code?: string }) => {
-        if (e.code === 'auth/user-not-found') return null;
-        throw e;
-      });
-      if (!existing) {
-        firebaseUid = (await auth.createUser({ email, displayName: fullName, emailVerified: false })).uid;
-        firebaseAccount = 'created';
-      } else if (existing.emailVerified) {
-        firebaseUid = existing.uid;
-        firebaseAccount = 'linked';
-      } else {
-        // Someone registered this address without proving they own it: do NOT link that account.
-        // The real owner signs in after verifying the e-mail (see resolveFirebaseUser).
-        firebaseAccount = 'unverified';
-        warning = 'อีเมลนี้มีบัญชี Firebase ที่ยังไม่ยืนยันอีเมลอยู่แล้ว — ผู้ใช้ต้องยืนยันอีเมลก่อนเข้าใช้งานครั้งแรก';
-      }
-    } catch (e) {
-      console.error('[users] Firebase account creation failed', e);
-      firebaseAccount = 'failed';
-      warning =
-        'สร้างบัญชีใน Firebase Authentication ไม่สำเร็จ — ผู้ใช้จะต้องสมัครด้วยอีเมลนี้และยืนยันอีเมลก่อนเข้าใช้งาน ' +
-        '(ตรวจสอบสิทธิ์ Firebase Authentication Admin ของ service account)';
-    }
   }
 
   const id = newId();
@@ -96,7 +65,8 @@ export async function inviteUser(user: AuthUser, body: Record<string, unknown>) 
     const ts = now();
     const doc: UserDoc = {
       email,
-      firebase_uid: firebaseUid,
+      // No Firebase account is created here: the first Google sign-in with this (verified) Gmail address links it.
+      firebase_uid: null,
       full_name: fullName,
       role: r,
       is_active: true,
@@ -109,7 +79,7 @@ export async function inviteUser(user: AuthUser, body: Record<string, unknown>) 
     audit(db, t, { actor: user.id, type: 'USER_INVITED', meta: { user_id: id, email, role: r } });
     return userRow(id, doc);
   });
-  return { user: created, warning, firebaseAccount };
+  return { user: created };
 }
 
 export async function updateUser(user: AuthUser, id: string, body: Record<string, unknown>) {

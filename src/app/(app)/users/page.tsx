@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { firebaseErrorMessage, useAuth } from '@/components/AuthProvider';
+import { useAuth } from '@/components/AuthProvider';
 import { IconPlus } from '@/components/icons';
 import { ErrorBox, Spinner, initials, useToast } from '@/components/ui';
-import { DEV_AUTH } from '@/lib/client/firebase';
 import { useApi } from '@/lib/client/useApi';
+import { isGmail } from '@/lib/shared/email';
 import { ROLE_LABEL, fmtDateTime } from '@/lib/shared/labels';
 import { ROLES, type AppUserRow, type Role } from '@/lib/shared/types';
 
@@ -18,7 +18,7 @@ const ROLE_HELP: Record<Role, string> = {
 };
 
 export default function UsersPage() {
-  const { me, api, resetPassword } = useAuth();
+  const { me, api } = useAuth();
   const toast = useToast();
   const { data, error, loading, reload, setData } = useApi<{ users: AppUserRow[] }>(me?.role === 'ADMIN' ? '/api/users' : null);
   const [email, setEmail] = useState('');
@@ -34,23 +34,17 @@ export default function UsersPage() {
     e.preventDefault();
     setFormError(null);
     setNotice(null);
+    if (!isGmail(email)) {
+      setFormError('เชิญได้เฉพาะอีเมล Gmail (@gmail.com)');
+      return;
+    }
     setBusy(true);
     try {
-      const r = await api<{ user: AppUserRow; warning: string | null; firebaseAccount: string }>('/api/users', {
+      const r = await api<{ user: AppUserRow }>('/api/users', {
         method: 'POST',
         json: { email, full_name: fullName, role },
       });
-      let msg = `เพิ่ม ${r.user.email} แล้ว`;
-      // The reset e-mail goes to the address itself, so only its real owner can set the password.
-      if (!DEV_AUTH && r.firebaseAccount !== 'failed') {
-        try {
-          await resetPassword(r.user.email);
-          msg += ' — ส่งอีเมลสำหรับตั้งรหัสผ่านให้ผู้ใช้แล้ว';
-        } catch (err) {
-          msg += ` — แต่ส่งอีเมลตั้งรหัสผ่านไม่สำเร็จ (${firebaseErrorMessage(err)})`;
-        }
-      }
-      setNotice(r.warning ? `${msg}\n${r.warning}` : msg);
+      setNotice(`เพิ่ม ${r.user.email} แล้ว — แจ้งผู้ใช้ให้กด “เข้าสู่ระบบด้วย Google” แล้วเลือกบัญชี Gmail นี้`);
       setEmail('');
       setFullName('');
       setRole('VIEWER');
@@ -70,15 +64,6 @@ export default function UsersPage() {
     } catch (err) {
       toast.show((err as Error).message, 'error');
       reload();
-    }
-  }
-
-  async function sendReset(u: AppUserRow) {
-    try {
-      await resetPassword(u.email);
-      toast.show(`ส่งอีเมลตั้งรหัสผ่านไปที่ ${u.email} แล้ว`);
-    } catch (err) {
-      toast.show(firebaseErrorMessage(err), 'error');
     }
   }
 
@@ -114,7 +99,6 @@ export default function UsersPage() {
                     <th>บทบาท</th>
                     <th>สถานะ</th>
                     <th>เข้าใช้ล่าสุด</th>
-                    {!DEV_AUTH && <th />}
                   </tr>
                 </thead>
                 <tbody>
@@ -161,13 +145,6 @@ export default function UsersPage() {
                       <td className="small muted" style={{ whiteSpace: 'nowrap' }}>
                         {u.last_login_at ? fmtDateTime(u.last_login_at) : 'ยังไม่เคยเข้า'}
                       </td>
-                      {!DEV_AUTH && (
-                        <td>
-                          <button type="button" className="btn-link" onClick={() => void sendReset(u)}>
-                            ส่งลิงก์ตั้งรหัสผ่าน
-                          </button>
-                        </td>
-                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -180,7 +157,8 @@ export default function UsersPage() {
           <h2>เชิญผู้ใช้ใหม่</h2>
           <label className="field">
             อีเมล
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@company.com" />
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@gmail.com" />
+            <span className="hint">เฉพาะ Gmail — ผู้ใช้กดปุ่ม Google แล้วเลือกอีเมลนี้</span>
           </label>
           <label className="field">
             ชื่อ-นามสกุล
@@ -202,9 +180,6 @@ export default function UsersPage() {
             <IconPlus size={18} />
             {busy ? 'กำลังเชิญ…' : 'เชิญผู้ใช้'}
           </button>
-          {!DEV_AUTH && (
-            <p className="small muted">ระบบจะสร้างบัญชีใน Firebase Authentication และส่งอีเมลให้ผู้ใช้ตั้งรหัสผ่านเอง</p>
-          )}
         </form>
       </div>
       {toast.node}

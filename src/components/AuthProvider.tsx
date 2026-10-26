@@ -1,10 +1,9 @@
 'use client';
 
 import {
+  GoogleAuthProvider,
   onIdTokenChanged,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
+  signInWithPopup,
   signOut as fbSignOut,
   type User,
 } from 'firebase/auth';
@@ -31,14 +30,11 @@ interface AuthState {
   blocked: { code?: string; message: string } | null;
   firebaseUser: User | null;
   api: <T = unknown>(path: string, init?: ApiInit) => Promise<T>;
-  signIn: (email: string, password: string) => Promise<void>;
+  /** Google sign-in popup (Gmail accounts only — enforced by the server). */
+  signIn: () => Promise<void>;
   devSignIn: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-  resendVerification: () => Promise<void>;
-  /** Reload the Firebase user (e.g. after verifying the e-mail) and fetch the profile again. */
-  recheck: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -154,8 +150,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [loadMe]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    await signInWithEmailAndPassword(firebaseAuth(), email.trim(), password);
+  const signIn = useCallback(async () => {
+    const provider = new GoogleAuthProvider();
+    // Always show the account chooser, so someone signed in to several Google accounts can pick the invited Gmail.
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithPopup(firebaseAuth(), provider);
   }, []);
 
   const devSignIn = useCallback(
@@ -180,26 +179,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fbSignOut(firebaseAuth());
   }, []);
 
-  const resetPassword = useCallback(async (email: string) => {
-    await sendPasswordResetEmail(firebaseAuth(), email.trim());
-  }, []);
-
-  const resendVerification = useCallback(async () => {
-    const user = firebaseAuth().currentUser;
-    if (user) await sendEmailVerification(user);
-  }, []);
-
-  const recheck = useCallback(async () => {
-    if (!DEV_AUTH && FIREBASE_CONFIGURED) {
-      const user = firebaseAuth().currentUser;
-      if (user) {
-        await user.reload();
-        await user.getIdToken(true);
-      }
-    }
-    await loadMe();
-  }, [loadMe]);
-
   const value = useMemo<AuthState>(
     () => ({
       status,
@@ -211,11 +190,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       devSignIn,
       signOut,
       refreshMe: loadMe,
-      resetPassword,
-      resendVerification,
-      recheck,
     }),
-    [status, me, blocked, firebaseUser, api, signIn, devSignIn, signOut, loadMe, resetPassword, resendVerification, recheck],
+    [status, me, blocked, firebaseUser, api, signIn, devSignIn, signOut, loadMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -227,17 +203,24 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
+/** The user closed the Google popup (or opened a second one) — not an error worth showing. */
+export function isPopupDismissed(err: unknown): boolean {
+  const code = (err as { code?: string })?.code;
+  return code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
+}
+
 /** Thai message for Firebase Auth client errors. */
 export function firebaseErrorMessage(err: unknown): string {
   const code = (err as { code?: string })?.code ?? '';
   switch (code) {
-    case 'auth/invalid-credential':
-    case 'auth/wrong-password':
-    case 'auth/user-not-found':
-    case 'auth/invalid-login-credentials':
-      return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
-    case 'auth/invalid-email':
-      return 'รูปแบบอีเมลไม่ถูกต้อง';
+    case 'auth/popup-blocked':
+      return 'เบราว์เซอร์บล็อกหน้าต่างเข้าสู่ระบบ กรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้แล้วลองใหม่';
+    case 'auth/unauthorized-domain':
+      return 'โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Authentication (Authorized domains) กรุณาติดต่อผู้ดูแลระบบ';
+    case 'auth/operation-not-allowed':
+      return 'ยังไม่ได้เปิดการเข้าสู่ระบบด้วย Google ใน Firebase Authentication กรุณาติดต่อผู้ดูแลระบบ';
+    case 'auth/account-exists-with-different-credential':
+      return 'อีเมลนี้ผูกกับวิธีเข้าสู่ระบบแบบอื่นอยู่ กรุณาติดต่อผู้ดูแลระบบ';
     case 'auth/too-many-requests':
       return 'ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่';
     case 'auth/user-disabled':

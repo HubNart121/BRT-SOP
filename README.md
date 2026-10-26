@@ -8,7 +8,7 @@
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Login | Firebase Authentication (Email/Password) · ตรวจ ID Token ที่เซิร์ฟเวอร์ทุก API · ผู้ดูแลคนแรกจาก `BOOTSTRAP_ADMIN_EMAIL` (ต้องยืนยันอีเมล) |
+| Login | ปุ่ม “เข้าสู่ระบบด้วย Google” เท่านั้น (Firebase Authentication) · รับเฉพาะ **@gmail.com** ที่ผู้ดูแลเชิญไว้ · ไม่มีรหัสผ่าน · ตรวจ ID Token + ผู้ให้บริการ (Google) + โดเมนอีเมลที่เซิร์ฟเวอร์ทุก API · ผู้ดูแลคนแรกจาก `BOOTSTRAP_ADMIN_EMAIL` (อีเมลเดียวที่ไม่ต้องเป็น Gmail) |
 | แดชบอร์ด | จำนวน SOP ที่เข้าถึงได้ / เผยแพร่ / ร่าง / รอพิจารณา · เส้นทางเอกสาร · อัปเดตล่าสุด · งานที่รอคุณ |
 | คลัง SOP | ค้นหารหัส ชื่อ และข้อความในเนื้อหา (ภาษาไทยแบบ substring) · กรองหมวดหมู่ · แสดงเฉพาะที่มีสิทธิ์อ่าน |
 | Editor | Tiptap (หัวข้อ ตัวหนา/เอียง/ขีดเส้นใต้ รายการ กล่องหมายเหตุ ลิงก์ ตาราง) · Ctrl+S บันทึก · กันบันทึกทับกัน (row_version) |
@@ -20,7 +20,7 @@
 | แชร์ลิงก์ | เจ้าของ SOP / ผู้ดูแล สร้างลิงก์ให้คนนอกดู **ฉบับเผยแพร่ล่าสุด** ได้โดยไม่ต้องล็อกอิน · บังคับวันหมดอายุ (1 ชม. – 90 วัน) · ยกเลิกได้ทันที · นับจำนวนครั้งที่เปิด · เก็บเฉพาะ hash ของ token |
 | PDF | หน้าพิมพ์ A4 พร้อมหัวกระดาษควบคุมเอกสาร (รหัส ชื่อ เวอร์ชัน วันที่มีผล) เลขหน้า ช่องลงนาม และลายน้ำ "ฉบับร่าง" → เลือก “บันทึกเป็น PDF” |
 | Audit | บันทึกทุกการเปลี่ยนสถานะ แสดงในหน้า SOP สำหรับเจ้าของและผู้ดูแล |
-| หมวดหมู่ / ผู้ใช้ | ผู้ดูแลเพิ่มหมวด · เชิญผู้ใช้ด้วยอีเมล (สร้างบัญชี Firebase + ส่งอีเมลตั้งรหัสผ่าน) · เปลี่ยนบทบาท / ระงับบัญชี |
+| หมวดหมู่ / ผู้ใช้ | ผู้ดูแลเพิ่มหมวด · เชิญผู้ใช้ด้วยอีเมล Gmail (ผูกบัญชีเมื่อผู้ใช้กดปุ่ม Google ครั้งแรก) · เปลี่ยนบทบาท / ระงับบัญชี |
 | Responsive | เดสก์ท็อป (แถบเมนูซ้าย) · แท็บเล็ต (แถบไอคอน) · มือถือ (แถบล่าง + ปุ่มสร้าง) |
 
 ## รันในเครื่อง (Firebase Emulator — ไม่แตะข้อมูลจริง)
@@ -57,13 +57,14 @@ npm run dev              # เทอร์มินัลที่ 2
 ### ทดสอบ Firebase Login จริงในเครื่อง
 
 ใช้ค่าในหัวข้อ “Auth Emulator” ของ `.env.example` ใน `.env.local` แล้ว `npm run dev` (emulator ต้องรันอยู่)
-อีเมลยืนยัน / ตั้งรหัสผ่านไม่ถูกส่งจริง — ดูลิงก์ได้จาก `http://127.0.0.1:9099/emulator/v1/projects/demo-brt-sop/oobCodes`
+กด “เข้าสู่ระบบด้วย Google” → หน้าต่างของ emulator ให้ **Add new account** แล้วกรอกอีเมลทดสอบเองได้ (ไม่ใช่บัญชี Google จริง):
+`boss@brt.test` = ผู้ดูแลคนแรก (ตาม `BOOTSTRAP_ADMIN_EMAIL`) · ผู้ใช้อื่นต้องเป็น `…@gmail.com` ที่เชิญไว้แล้ว
 
 ## โครงสร้างโปรเจกต์
 
 ```text
 apphosting.yaml            Firebase App Hosting (runConfig + env)
-firebase.json              Firestore rules/indexes, Auth provider, emulator ports
+firebase.json              Firestore rules/indexes, emulator ports
 firestore.rules            ปิดการเข้าถึงจากเบราว์เซอร์ทั้งหมด (ใช้ผ่าน API เท่านั้น)
 scripts/emulators.mjs      npm run emulators
 src/app/(app)/             หน้าหลังล็อกอิน: แดชบอร์ด, sops, sops/new, sops/[id], approvals, categories, users
@@ -111,12 +112,12 @@ src/lib/shared/            types, labels, content (ตรวจ/แปลงเ�
 
 ## Deploy ขึ้น Firebase (project `brt-sop-center`)
 
-ค่าที่ตั้งไว้แล้วในโค้ด: Web SDK config + `BOOTSTRAP_ADMIN_EMAIL` (`apphosting.yaml`), Email/Password (`firebase.json`)
+ค่าที่ตั้งไว้แล้วในโค้ด: Web SDK config + `BOOTSTRAP_ADMIN_EMAIL` (`apphosting.yaml`)
 
 ```bash
-# 1) สร้าง Firestore (ครั้งเดียว) และ deploy rules + Auth provider
+# 1) สร้าง Firestore (ครั้งเดียว) และ deploy rules
 firebase firestore:databases:create "(default)" --location asia-southeast1 --project brt-sop-center
-firebase deploy --only firestore,auth --project brt-sop-center
+firebase deploy --only firestore --project brt-sop-center
 
 # 2) สร้าง App Hosting backend (เชื่อม GitHub repo, branch main, root "/")
 firebase apphosting:backends:create --project brt-sop-center --backend brt-sop \
@@ -126,13 +127,17 @@ firebase apphosting:backends:create --project brt-sop-center --backend brt-sop \
 หลังจากนั้นทุกครั้งที่ push ขึ้น `main` จะ Deploy อัตโนมัติ · ดูสถานะ/URL `*.hosted.app` ที่ Firebase Console → App Hosting
 
 **ใน Firebase Console:**
-- **Authentication → Settings → User actions** → แนะนำให้ **ปิด “Enable create (sign-up)”** — มีแต่ผู้ที่ผู้ดูแลเชิญเท่านั้นที่มีบัญชี
-- **Authentication → Templates** → ตั้งภาษา/ชื่อผู้ส่งของอีเมล “ยืนยันอีเมล” และ “รีเซ็ตรหัสผ่าน”
-- **Authentication → Users → Add user** → สร้างบัญชีผู้ดูแลคนแรก (`sl@brt.co.th`) · ครั้งแรกที่ล็อกอิน กด “ส่งอีเมลยืนยันตัวตน” →
-  เปิดลิงก์ในอีเมล → กด “ตรวจสอบอีกครั้ง” แล้วจะได้สิทธิ์ ADMIN พร้อมหมวดหมู่เริ่มต้น 4 หมวด
+- **Authentication → Sign-in method → Google** → **Enable** และเลือก support email · ถ้าเคยเปิด **Email/Password** ไว้ ให้ปิด
+  (`firebase deploy` เปิด/ปิด provider ให้ไม่ได้ — แต่ถึงลืมปิด เซิร์ฟเวอร์ก็ปฏิเสธ token ที่ไม่ได้มาจาก Google อยู่แล้ว)
+- **Authentication → Settings → Authorized domains** → เพิ่มโดเมน `*.hosted.app` ของ backend (และโดเมนจริงถ้ามี) —
+  ถ้าไม่เพิ่ม ปุ่ม Google จะขึ้น “โดเมนนี้ยังไม่ได้รับอนุญาต”
+- **Authentication → Settings → User actions** → ต้อง **เปิด “Enable create (sign-up)” ไว้** (ค่าเริ่มต้น) — ผู้ถูกเชิญได้บัญชี Firebase ตอนกดปุ่ม Google ครั้งแรก ·
+  คนที่ไม่ได้รับเชิญอาจมีบัญชีใน Firebase ได้ แต่เข้าระบบไม่ได้ (API ตอบ 403)
+- **ผู้ดูแลคนแรก:** เปิดเว็บ → “เข้าสู่ระบบด้วย Google” ด้วย `sl@brt.co.th` → ได้สิทธิ์ ADMIN พร้อมหมวดหมู่เริ่มต้น 4 หมวด ·
+  อีเมลนี้ต้องเป็นบัญชี Google (Google Workspace ของบริษัท หรือบัญชี Google ที่สร้างด้วยอีเมลนี้) — เป็นอีเมลเดียวที่ไม่ใช่ Gmail ที่เข้าระบบได้
 
-**สิทธิ์ของ backend:** ถ้า log ขึ้น `PERMISSION_DENIED` ตอนอ่าน Firestore หรือเชิญผู้ใช้ไม่ได้ ให้เพิ่ม role **Cloud Datastore User**
-และ **Firebase Authentication Admin** ให้ service account ของ backend (`firebase-app-hosting-compute@brt-sop-center.iam.gserviceaccount.com`) ใน IAM
+**สิทธิ์ของ backend:** ถ้า log ขึ้น `PERMISSION_DENIED` ตอนอ่าน Firestore ให้เพิ่ม role **Cloud Datastore User**
+ให้ service account ของ backend (`firebase-app-hosting-compute@brt-sop-center.iam.gserviceaccount.com`) ใน IAM
 
 **สำรองข้อมูล:** เปิด Point-in-time recovery / scheduled backups ของ Firestore ได้ที่ Firebase Console → Firestore → Disaster recovery
 
@@ -147,13 +152,14 @@ Viewer เห็นเฉพาะฉบับเผยแพร่และพ�
 
 - เบราว์เซอร์อ่าน/เขียน Firestore โดยตรงไม่ได้ (`firestore.rules` ปิดทั้งหมด) — ทุกอย่างผ่าน API ที่ตรวจ Firebase ID Token + Role + Ownership + Assignee ที่เซิร์ฟเวอร์
 - ทุกการเปลี่ยนสถานะ (ส่งตรวจ / อนุมัติ / เผยแพร่ / สร้างฉบับแก้ไข) ทำใน Firestore transaction — คำขอพร้อมกันจะมีผลได้รายการเดียว
-- ผู้ใช้ผูกกับบัญชี Firebase ด้วย uid · ถ้าผูกด้วยอีเมลต้องยืนยันอีเมลแล้วเท่านั้น — บัญชีที่มีคนสมัครด้วยอีเมลพนักงานไว้ก่อนแต่ยังไม่ยืนยัน จะไม่ถูกผูกตอนเชิญ (กันการสวมรอย)
+- ทุกคำขอต้องมาจาก Google sign-in (`sign_in_provider = google.com`) และเป็นอีเมล `@gmail.com` (ยกเว้น `BOOTSTRAP_ADMIN_EMAIL`) — token จากรหัสผ่านหรือ provider อื่นได้ 403
+- ผู้ใช้ผูกกับบัญชี Firebase ด้วย uid · การผูกครั้งแรก (ตอนกดปุ่ม Google หลังได้รับเชิญ) ใช้อีเมลที่ Google ยืนยันแล้วเท่านั้น (กันการสวมรอย)
 - ผู้ไม่มีสิทธิ์อ่าน Draft จะได้ 404 (ไม่รู้ว่ามีเอกสารอยู่) และค้นหาข้อความในร่างไม่เจอ
 - เนื้อหา Tiptap ถูกตรวจชนิด node/mark ที่เซิร์ฟเวอร์ · ลิงก์อนุญาตเฉพาะ `http(s)` / `mailto` · ภาพ Flowchart รับเฉพาะ PNG
 - **ลิงก์แชร์:** token สุ่ม 256 บิต เก็บเฉพาะ SHA-256 (แสดงลิงก์ได้ครั้งเดียวตอนสร้าง) · เห็นเฉพาะฉบับเผยแพร่ ไม่เห็นร่าง/อีเมล/ไฟล์ draw.io ·
   ลิงก์หมดอายุ ถูกยกเลิก หรือผู้สร้างถูกระงับบัญชี → ใช้ไม่ได้ทันที (ตอบ 404 เหมือนกันทุกกรณี) · หน้าแชร์ส่ง `Referrer-Policy: no-referrer` + `noindex` ·
   ถ้ามีฉบับใหม่ได้รับอนุมัติ ลิงก์เดิมจะแสดงฉบับใหม่ทันที
-- Content-Security-Policy จำกัด iframe ไว้ที่ `embed.diagrams.net` และ `www.youtube-nocookie.com` — ถ้าเปิดใช้ reCAPTCHA / App Check ต้องเพิ่มโดเมนใน `next.config.ts`
+- Content-Security-Policy จำกัด iframe ไว้ที่ `embed.diagrams.net`, `www.youtube-nocookie.com` และ auth domain ของ Firebase · สคริปต์ภายนอกมีแค่ `apis.google.com` (ตัวโหลดของ Google sign-in) — ถ้าเปิดใช้ reCAPTCHA / App Check ต้องเพิ่มโดเมนใน `next.config.ts`
 - วิดีโอเก็บเฉพาะรหัสคลิป YouTube (ตรวจรูปแบบที่เซิร์ฟเวอร์) ไม่เก็บ URL หรือ HTML ที่ผู้ใช้วางมาโดยตรง — คลิปที่ตั้งเป็น Private บน YouTube จะเล่นไม่ได้ ควรใช้ Public หรือ Unlisted
 - **draw.io:** editor โหลดจากโดเมนสาธารณะของ diagrams.net (ประมวลผลในเบราว์เซอร์) — ทบทวนนโยบายข้อมูลบริษัทก่อนใช้กับเอกสารอ่อนไหว หรือ self-host draw.io แล้วแก้ `DRAWIO_ORIGIN`
 

@@ -1,6 +1,7 @@
 import 'server-only';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
+import { isGmail } from '@/lib/shared/email';
 import type { Role } from '@/lib/shared/types';
 import { C, data, emailKey, getDb, newId, now, type CategoryDoc, type UserDoc } from './db';
 import { adminAuth } from './firebase-admin';
@@ -28,6 +29,8 @@ export function devAuthEnabled(): boolean {
 }
 
 const unauthenticated = (msg = 'กรุณาเข้าสู่ระบบ') => new HttpError(401, msg, 'UNAUTHENTICATED');
+
+const bootstrapEmail = () => (process.env.BOOTSTRAP_ADMIN_EMAIL ?? '').trim().toLowerCase();
 
 const toAuthUser = (id: string, u: UserDoc): AuthUser => ({
   id,
@@ -71,11 +74,19 @@ function ensureActive(user: AuthUser): AuthUser {
 }
 
 async function resolveFirebaseUser(db: Firestore, token: DecodedIdToken): Promise<AuthUser> {
-  const byUid = await findUser(db, 'firebase_uid', token.uid);
-  if (byUid) return ensureActive(byUid);
-
+  // Checked on every request: a token from any other provider (e.g. a leftover e-mail/password account) is refused.
+  if (token.firebase?.sign_in_provider !== 'google.com') {
+    throw new HttpError(403, 'กรุณาเข้าสู่ระบบด้วยบัญชี Google (Gmail)', 'GOOGLE_ONLY');
+  }
   const email = (token.email ?? '').toLowerCase();
   if (!email) throw new HttpError(403, 'บัญชีนี้ไม่มีอีเมล', 'NO_EMAIL');
+  const bootstrap = bootstrapEmail();
+  if (!isGmail(email) && email !== bootstrap) {
+    throw new HttpError(403, 'ระบบรับเฉพาะบัญชี Gmail (@gmail.com) กรุณาเลือกบัญชี Gmail ที่ได้รับเชิญ', 'GMAIL_ONLY');
+  }
+
+  const byUid = await findUser(db, 'firebase_uid', token.uid);
+  if (byUid) return ensureActive(byUid);
 
   const existing = await findUser(db, 'email', email);
   if (existing) {
@@ -97,7 +108,6 @@ async function resolveFirebaseUser(db: Firestore, token: DecodedIdToken): Promis
     return ensureActive(linked);
   }
 
-  const bootstrap = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? '').trim().toLowerCase();
   if (bootstrap && email === bootstrap) {
     if (!token.email_verified) {
       throw new HttpError(403, 'กรุณายืนยันอีเมลของผู้ดูแลระบบก่อนเข้าใช้งาน', 'EMAIL_NOT_VERIFIED');

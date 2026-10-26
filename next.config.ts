@@ -26,7 +26,8 @@ const authEmulator = isDev ? process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST
 
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+  // apis.google.com: loader the Firebase Auth SDK uses for the Google sign-in popup
+  `script-src 'self' 'unsafe-inline' https://apis.google.com${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
   // i.ytimg.com: YouTube thumbnails for clip blocks (dialog preview + printed copies)
   "img-src 'self' data: blob: https://i.ytimg.com",
@@ -34,8 +35,11 @@ const csp = [
   `connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com${isDev ? ' ws: wss:' : ''}${
     authEmulator ? ` http://${authEmulator}` : ''
   }`,
-  // draw.io editor and YouTube (privacy-enhanced) players are embedded; the auth domain is for the Auth SDK helper iframe.
-  `frame-src https://embed.diagrams.net https://www.youtube-nocookie.com${authDomain ? ` https://${authDomain}` : ''}`,
+  // draw.io editor and YouTube (privacy-enhanced) players are embedded; the auth domain (or the Auth Emulator)
+  // serves the Auth SDK helper iframe that completes the Google sign-in popup.
+  `frame-src https://embed.diagrams.net https://www.youtube-nocookie.com${authDomain ? ` https://${authDomain}` : ''}${
+    authEmulator ? ` http://${authEmulator}` : ''
+  }`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

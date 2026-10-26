@@ -12,7 +12,8 @@ runConfig:
   cpu: 1
 
 env:
-  # First sign-in of this (verified) e-mail creates the first ADMIN of an empty system.
+  # First Google sign-in of this (verified) e-mail creates the first ADMIN of an empty system.
+  # Everyone else must use an invited @gmail.com address; this is the only non-Gmail account allowed.
   - variable: BOOTSTRAP_ADMIN_EMAIL
     value: "sl@brt.co.th"
     availability:

@@ -2,6 +2,7 @@
 import { getApps, initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   browserSessionPersistence,
   connectAuthEmulator,
   indexedDBLocalPersistence,
@@ -29,9 +30,10 @@ export function firebaseAuth(): Auth {
   }
   if (!auth) {
     const app = getApps()[0] ?? initializeApp(config);
-    // Email/password only: no popup/redirect resolver, so no Google iframe or gapi script is loaded (fits the CSP).
+    // Google sign-in popup: loads apis.google.com/js/api.js and an iframe on the auth domain (both allowed in the CSP).
     auth = initializeAuth(app, {
       persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
     });
     auth.languageCode = 'th';
     // Local testing against the Firebase Auth Emulator (`npx firebase-tools emulators:start --only auth`).
